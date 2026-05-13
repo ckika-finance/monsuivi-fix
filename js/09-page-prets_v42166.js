@@ -1,0 +1,310 @@
+/* ============================================================
+   js/09-page-prets.js — Suivi des Prêts & Crédits
+   - Mois de début, dates réelles amortissement, capital recalculé
+   ============================================================ */
+
+const MONTHS_FR_LONG = ['Janvier','Février','Mars','Avril','Mai','Juin',
+  'Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+function moisEcoules(pret) {
+  if (!pret.startDate) return 0;
+  const start = new Date(pret.startDate);
+  const now   = new Date();
+  return Math.max(0, (now.getFullYear()-start.getFullYear())*12 + (now.getMonth()-start.getMonth()));
+}
+
+function capitalActuel(pret) {
+  if (!pret.startDate) return pret.capitalRestant;
+  const n = moisEcoules(pret);
+  const taux = pret.tauxAnnuel/100/12;
+  let cap = pret.capitalRestant;
+  for (let i=0; i<n && cap>0.01; i++) {
+    const interet = Math.round(cap*taux*100)/100;
+    const capPart = Math.min(cap, Math.round((pret.mensualite-interet)*100)/100);
+    cap = Math.max(0, Math.round((cap-capPart)*100)/100);
+  }
+  return cap;
+}
+
+function dureeRestanteActuelle(pret) {
+  return Math.max(0, pret.dureeRestante - moisEcoules(pret));
+}
+
+function fmtStartDate(pret) {
+  if (!pret.startDate) return 'Non renseigné';
+  const d = new Date(pret.startDate);
+  return `${MONTHS_FR_LONG[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function fmtEcheance(pret, moisOffset) {
+  if (!pret.startDate) return `Mois ${moisOffset}`;
+  const d = new Date(pret.startDate);
+  d.setMonth(d.getMonth() + moisEcoules(pret) + moisOffset);
+  return `${MONTHS_FR_LONG[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function buildAmortissement(pret, capitalDepart, duree) {
+  const rows = [];
+  let cap    = capitalDepart!==undefined ? capitalDepart : pret.capitalRestant;
+  const dur  = duree!==undefined ? duree : pret.dureeRestante;
+  const taux = pret.tauxAnnuel/100/12;
+  const mens = pret.mensualite;
+  let totInt = 0;
+  for (let m=1; m<=dur && cap>0.01; m++) {
+    const pi  = Math.round(cap*taux*100)/100;
+    const pc  = Math.min(cap, Math.round((mens-pi)*100)/100);
+    cap       = Math.max(0, Math.round((cap-pc)*100)/100);
+    totInt    = Math.round((totInt+pi)*100)/100;
+    rows.push({mois:m, mensualite:mens, partCapital:pc, partInterets:pi, capitalRestant:cap, totalInterets:totInt});
+  }
+  return rows;
+}
+
+function renderPrets() {
+  if (!window._pretActif || !DB.prets.find(p=>p.id===window._pretActif)) {
+    window._pretActif = DB.prets.length ? DB.prets[0].id : null;
+  }
+
+  if (!DB.prets || DB.prets.length===0) {
+    return `<div class="section-wrap">
+      <div class="section-header">
+        <span class="section-title">Prêts & Crédits</span>
+        <button class="btn-add" onclick="openPretModal()"><i class="ti ti-plus"></i> Ajouter un crédit</button>
+      </div>
+      <div class="empty-state" style="padding:40px">Aucun crédit enregistré.</div>
+    </div>`;
+  }
+
+  const pret     = DB.prets.find(p=>p.id===window._pretActif);
+  const capNow   = capitalActuel(pret);
+  const durNow   = dureeRestanteActuelle(pret);
+  const amort    = buildAmortissement(pret, capNow, durNow);
+  const totalInt = amort.length ? amort[amort.length-1].totalInterets : 0;
+  const totalMens = DB.prets.reduce((s,p)=>s+p.mensualite,0);
+  const totalCap  = DB.prets.reduce((s,p)=>s+capitalActuel(p),0);
+
+  const name1 = p1(), name2 = p2();
+  const txCredits = DB.transactions.filter(t=>t.type==='credits');
+
+  function creditsPourPersonne(owner) {
+    const cats={};
+    txCredits.forEach(t=>{
+      let share=Math.abs(t.amount);
+      if(t.owner==='Commun') share/=2;
+      else if(t.owner!==owner) return;
+      cats[t.label]=(cats[t.label]||0)+share;
+    });
+    return cats;
+  }
+  const cred1=creditsPourPersonne(name1), cred2=creditsPourPersonne(name2);
+  const total1=Object.values(cred1).reduce((s,v)=>s+v,0);
+  const total2=Object.values(cred2).reduce((s,v)=>s+v,0);
+  const budCre=Object.values(DB.budgets.credits||{}).reduce((a,b)=>a+b,0);
+
+  const mensP1  = DB.prets.filter(p=>p.owner===name1).reduce((s,p)=>s+p.mensualite,0);
+  const mensP2  = DB.prets.filter(p=>p.owner===name2).reduce((s,p)=>s+p.mensualite,0);
+  const mensCom = DB.prets.filter(p=>!p.owner||p.owner==='Commun').reduce((s,p)=>s+p.mensualite,0);
+
+  return `
+  <!-- KPI globaux -->
+  <div class="kpi-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px">
+    <div class="kpi-card">
+      <div class="kpi-label">Total mensualités</div>
+      <div class="kpi-value red">${fmt(totalMens)}</div>
+      <div class="kpi-sub">${DB.prets.length} crédit${DB.prets.length>1?'s':''}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Capital total restant</div>
+      <div class="kpi-value blue">${fmt(totalCap)}</div>
+      <div class="kpi-sub">Recalculé à ce jour</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Intérêts restants</div>
+      <div class="kpi-value" style="color:#BA7517">${fmt(totalInt)}</div>
+      <div class="kpi-sub">Pour ${pret.nom}</div>
+    </div>
+  </div>
+
+  <!-- Par titulaire — masqué si 1 seule personne -->
+  ${getActivePersons().length>1?`
+  <div class="kpi-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:20px">
+    <div class="kpi-card" style="border-top:3px solid #185FA5">
+      <div class="kpi-label"><span class="pret-owner-badge pret-owner-p1" style="font-size:10px">◈ ${name1}</span></div>
+      <div class="kpi-value" style="color:#185FA5;font-size:15px">${mensP1>0?fmt(mensP1)+'/mois':'—'}</div>
+      <div class="kpi-sub">${DB.prets.filter(p=>p.owner===name1).length} crédit(s)</div>
+    </div>
+    <div class="kpi-card" style="border-top:3px solid #72243E">
+      <div class="kpi-label"><span class="pret-owner-badge pret-owner-p2" style="font-size:10px">◈ ${name2}</span></div>
+      <div class="kpi-value" style="color:#72243E;font-size:15px">${mensP2>0?fmt(mensP2)+'/mois':'—'}</div>
+      <div class="kpi-sub">${DB.prets.filter(p=>p.owner===name2).length} crédit(s)</div>
+    </div>
+    <div class="kpi-card" style="border-top:3px solid #999">
+      <div class="kpi-label"><span class="pret-owner-badge pret-owner-com" style="font-size:10px">👥 Commun</span></div>
+      <div class="kpi-value" style="color:#555;font-size:15px">${mensCom>0?fmt(mensCom)+'/mois':'—'}</div>
+      <div class="kpi-sub">${DB.prets.filter(p=>!p.owner||p.owner==='Commun').length} crédit(s)</div>
+    </div>
+  </div>`:''}
+
+  <!-- Crédits par personne — masqué si 1 seule personne -->
+  ${getActivePersons().length>1?`
+  <div class="section-wrap" style="margin-bottom:20px">
+    <div class="section-header">
+      <span class="section-title">Crédits par personne</span>
+      <span style="font-size:12px;color:#999">Depuis les transactions · Commun ÷ 2</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
+      <div style="padding:16px;border-right:1px solid var(--color-border-tertiary)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <b>${name1}</b><span class="kpi-value red" style="font-size:15px">${fmt(total1)}</span>
+        </div>
+        ${Object.keys(DB.budgets.credits||{}).length ? renderPersonCreditBars(name1,cred1,budCre) : ''}
+        ${Object.keys(cred1).length===0 ? '<div style="color:#bbb;font-size:12px;text-align:center;padding:12px">Aucun crédit</div>' : renderPersonCreditRows(cred1)}
+      </div>
+      <div style="padding:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <b>${name2}</b><span class="kpi-value red" style="font-size:15px">${fmt(total2)}</span>
+        </div>
+        ${Object.keys(DB.budgets.credits||{}).length ? renderPersonCreditBars(name2,cred2,budCre) : ''}
+        ${Object.keys(cred2).length===0 ? '<div style="color:#bbb;font-size:12px;text-align:center;padding:12px">Aucun crédit</div>' : renderPersonCreditRows(cred2)}
+      </div>
+    </div>
+  </div>`:''}
+
+  <!-- Sélecteur crédit actif -->
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+    ${DB.prets.map(p=>`
+    <button class="tab-btn ${p.id===window._pretActif?'active':''}" onclick="window._pretActif='${p.id}';render()">
+      ${p.nom}${p.type?` <span style="font-size:10px;opacity:.7">(${p.type})</span>`:''}
+    </button>`).join('')}
+    <button class="btn-add" style="margin-left:auto" onclick="openPretModal()">
+      <i class="ti ti-plus"></i> Ajouter
+    </button>
+  </div>
+
+  <!-- Détail crédit sélectionné -->
+  <div class="section-wrap" style="margin-bottom:20px">
+    <div class="section-header">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="section-title">${pret.nom}</span>
+        ${getActivePersons().length>1?pretOwnerBadge(pret.owner):''}
+        ${pret.type?`<span style="background:#f0efed;padding:2px 8px;border-radius:10px;font-size:11px;color:#666">${pret.type}</span>`:''}
+      </div>
+      <button class="btn-trash" onclick="deletePret('${pret.id}','${pret.nom}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        Supprimer
+      </button>
+    </div>
+    <div style="padding:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+      <div class="kpi-card">
+        <div class="kpi-label">Mensualité</div>
+        <div class="kpi-value red" style="font-size:16px">${fmt(pret.mensualite)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Capital restant</div>
+        <div class="kpi-value blue" style="font-size:16px">${fmt(capNow)}</div>
+        <div class="kpi-sub">À ce jour</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Taux annuel</div>
+        <div class="kpi-value" style="color:#BA7517;font-size:16px">${pret.tauxAnnuel}%</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Durée restante</div>
+        <div class="kpi-value" style="color:#534AB7;font-size:16px">${durNow} mois</div>
+        <div class="kpi-sub">≈ ${(durNow/12).toFixed(1)} ans</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Début du crédit</div>
+        <div style="font-size:13px;font-weight:500;color:#1a1a1a;margin-top:6px">${fmtStartDate(pret)}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Avancement -->
+  <div class="section-wrap" style="margin-bottom:20px">
+    <div class="section-header"><span class="section-title">Avancement du remboursement</span></div>
+    <div style="padding:16px">
+      ${DB.prets.map(p=>{
+        const cCur = capitalActuel(p);
+        const n    = moisEcoules(p);
+        const amF  = buildAmortissement(p, p.capitalRestant, p.dureeRestante);
+        const paid = amF.slice(0,n).reduce((s,r)=>s+r.partCapital,0);
+        const cIni = cCur + paid;
+        const pct  = cIni>0 ? Math.min(100,Math.round(paid/cIni*100)) : 0;
+        return `<div class="prog-row" style="margin-bottom:16px">
+          <div class="prog-header" style="margin-bottom:6px">
+            <span style="font-weight:500">${p.nom} ${p.type?`(${p.type})`:''}</span>
+            <span style="color:#888">${fmt(cCur)} restants · ${dureeRestanteActuelle(p)} mois</span>
+          </div>
+          <div class="prog-track" style="height:10px;border-radius:6px">
+            <div class="prog-real" style="width:${pct}%;background:${pct>75?'#1D9E75':pct>40?'#378ADD':'#BA7517'};border-radius:6px"></div>
+          </div>
+          <div style="font-size:11px;color:#aaa;margin-top:4px;text-align:right">
+            ${pct}% remboursé${p.startDate?` · Démarré ${fmtStartDate(p)}`:''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>
+
+  <!-- Tableau amortissement avec vraies dates -->
+  <div class="section-wrap">
+    <div class="section-header">
+      <span class="section-title">Tableau d'amortissement — ${pret.nom}</span>
+      <span style="font-size:12px;color:#999">24 prochaines échéances</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="budget-table" style="font-size:12px">
+        <thead>
+          <tr>
+            <th style="text-align:left">Échéance</th>
+            <th>Mensualité</th><th>Part capital</th>
+            <th>Part intérêts</th><th>Capital restant</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${amort.slice(0,24).map((r,i)=>`
+          <tr>
+            <td style="color:#666;font-weight:500">${fmtEcheance(pret,i+1)}</td>
+            <td>${fmt(r.mensualite)}</td>
+            <td style="color:#1D9E75">${fmt(r.partCapital)}</td>
+            <td style="color:#D85A30">${fmt(r.partInterets)}</td>
+            <td style="font-weight:600">${fmt(r.capitalRestant)}</td>
+          </tr>`).join('')}
+          ${amort.length>24?`<tr><td colspan="5" style="text-align:center;color:#bbb;padding:12px;font-size:11px">… ${amort.length-24} échéances supplémentaires</td></tr>`:''}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function renderPersonCreditBars(owner, credCats, budgetTotal) {
+  const cats=Object.keys(DB.budgets.credits||{});
+  if (!cats.length) return '';
+  const max=Math.max(...cats.map(c=>Math.max(credCats[c]||0,DB.budgets.credits[c]||0)),1);
+  return `<div style="margin-bottom:12px">`+cats.map(cat=>{
+    const r=credCats[cat]||0,b=DB.budgets.credits[cat]||0,over=r>b&&b>0;
+    return `<div class="bar-row">
+      <div class="bar-row-label" title="${cat}">${cat}</div>
+      <div class="bar-track"><div class="bar-bg"></div>
+        <div class="bar-fill" style="width:${Math.min(100,Math.round(r/max*100))}%;background:${over?'#D85A30':'#BA7517'}"></div>
+        <div class="bar-mark" style="left:${Math.min(100,Math.round(b/max*100))}%"></div>
+      </div>
+      <div class="bar-val ${over?'amount-neg':''}">${fmtS(r)}${over?' ▲':''}</div>
+    </div>`;
+  }).join('')+`</div>`;
+}
+
+function renderPersonCreditRows(credCats) {
+  return `<table class="data-table" style="font-size:12px">
+    <tr><th>Catégorie</th><th>Montant payé</th><th>Budget</th></tr>
+    ${Object.entries(credCats).map(([cat,v])=>{
+      const b=DB.budgets.credits?.[cat]||0,over=v>b&&b>0;
+      return `<tr class="${over?'row-alert':''}">
+        <td>${cat}</td>
+        <td style="${over?'color:#993C1D;font-weight:600':''}">${fmt(v)}${over?' ▲':''}</td>
+        <td>${b>0?fmt(b):'<span style="color:#ccc">—</span>'}</td>
+      </tr>`;
+    }).join('')}
+  </table>`;
+}

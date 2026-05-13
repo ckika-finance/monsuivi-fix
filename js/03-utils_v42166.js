@@ -1,0 +1,317 @@
+/* ============================================================
+   js/03-utils.js — Fonctions utilitaires
+   ============================================================ */
+
+const fmt  = v => Math.abs(v)<0.001 ? '-' : Math.abs(v).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+const fmtS = v => Math.abs(v)<0.001 ? '-' : Math.abs(v).toLocaleString('fr-FR',{minimumFractionDigits:0,maximumFractionDigits:0})+' €';
+const uid  = () => 'id_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+
+const THIS_YEAR = new Date().getFullYear();
+
+function getTxByMonthYear(month, year) {
+  return DB.transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth()+1===month && d.getFullYear()===year;
+  });
+}
+function getTxByYear(year) {
+  return DB.transactions.filter(t => new Date(t.date).getFullYear()===year);
+}
+function getAvailableYears() {
+  const s = new Set(DB.transactions.map(t => new Date(t.date).getFullYear()));
+  s.add(THIS_YEAR);
+  return [...s].sort((a,b)=>b-a);
+}
+/* isPastYear défini dans 11-permissions.js (basé sur canEdit) */
+
+const sumType   = (txs,type) => txs.filter(t=>t.type===type).reduce((s,t)=>s+Math.abs(t.amount),0);
+const realByCat = (txs,type) => { const r={}; txs.filter(t=>t.type===type).forEach(t=>{r[t.label]=(r[t.label]||0)+Math.abs(t.amount);}); return r; };
+const pct       = (real,bud,max=150) => bud<=0?0:Math.min(max,Math.round(real/bud*100));
+const budgetStatus = (r,b) => { if(b<=0) return 'OK'; const v=r/b; return v>1?'Dépassé':v>0.85?'Limite':'OK'; };
+
+/* Solde net = revenus - (dépenses + abonnements + crédits) */
+function soldeNet(txs) {
+  return sumType(txs,'revenus') - sumType(txs,'depenses') - sumType(txs,'abonnements') - sumType(txs,'credits');
+}
+/* Solde net pour une personne (Commun /2) */
+function soldeNetForPerson(txs, owner) {
+  const types = ['revenus','depenses','abonnements','credits'];
+  let total = 0;
+  types.forEach(type => {
+    txs.filter(t=>t.type===type).forEach(t => {
+      let share = Math.abs(t.amount);
+      if (t.owner==='Commun') share /= 2;
+      else if (t.owner!==owner) return;
+      total += (type==='revenus') ? share : -share;
+    });
+  });
+  return total;
+}
+
+/* "abonnements" → libellé "Abonnement" partout dans l'UI */
+const TYPE_LABELS     = {revenus:'Revenu',depenses:'Dépense',abonnements:'Abonnement',credits:'Crédit',epargne:'Épargne',projets:'Projet'};
+const TYPE_COLORS     = {revenus:'#1D9E75',depenses:'#D85A30',abonnements:'#378ADD',credits:'#BA7517',epargne:'#534AB7',projets:'#D4537E'};
+const TYPE_BADGE      = {revenus:'badge-rev',depenses:'badge-dep',abonnements:'badge-abo',credits:'badge-cre',epargne:'badge-epa',projets:'badge-pro'};
+const TYPE_HEADER_CLS = {revenus:'rev',depenses:'dep',abonnements:'abo',credits:'cre',epargne:'epa',projets:'pro'};
+
+/* ---- Injection automatique des abonnements comme transactions ---- */
+function injectAbonnementsTransactions() {
+  const now   = new Date();
+  const year  = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const dateStr = `${year}-${String(month).padStart(2,'0')}-01`;
+  let changed = false;
+
+  DB.abonnements.forEach(abo => {
+    /* Vérifier si une transaction auto existe déjà pour ce mois */
+    const key   = `abo_auto_${abo.id}_${year}_${month}`;
+    const exist = DB.transactions.find(t => t._aboKey === key);
+    if (exist) return;
+
+    DB.transactions.push({
+      id:      uid(),
+      _aboKey: key,
+      date:    dateStr,
+      label:   abo.name,
+      type:    'abonnements',
+      owner:   abo.owner || 'Commun',
+      amount:  -Math.abs(abo.amount),
+      comment: 'Abonnement auto'
+    });
+    changed = true;
+  });
+
+  /* Sauvegarder si de nouvelles transactions ont été créées */
+  if (changed && typeof saveDB === 'function') saveDB();
+}
+
+/* ---- Injection automatique des mensualités de prêts ---- */
+function injectPretsTransactions() {
+  const now   = new Date();
+  const year  = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const dateStr = `${year}-${String(month).padStart(2,'0')}-01`;
+  let changed = false;
+
+  DB.prets.forEach(pret => {
+    /* Ne pas injecter si le prêt n'a pas encore commencé ce mois */
+    if (pret.startDate) {
+      const start = new Date(pret.startDate);
+      const startYear  = start.getFullYear();
+      const startMonth = start.getMonth() + 1;
+      if (year < startYear || (year === startYear && month < startMonth)) return;
+    }
+
+    const key   = `pret_auto_${pret.id}_${year}_${month}`;
+    const exist = DB.transactions.find(t => t._pretKey === key);
+    if (exist) return;
+
+    /* Catégorie crédit = type du prêt (Auto, Conso, Habitation) */
+    const creditCat = pret.type === 'Logement' ? 'Habitation' : (pret.type || 'Conso');
+
+    DB.transactions.push({
+      id:       uid(),
+      _pretKey: key,
+      date:     dateStr,
+      label:    creditCat,
+      type:     'credits',
+      owner:    pret.owner || 'Commun',
+      amount:   -Math.abs(pret.mensualite),
+      comment:  `Mensualité ${pret.nom}`
+    });
+    changed = true;
+  });
+
+  if (changed && typeof saveDB === 'function') saveDB();
+}
+
+/* ---- Transfert solde → épargne en début de mois ---- */
+function checkMonthlyTransfer() {
+  const now   = new Date();
+  const year  = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const key   = `transfer_${year}_${month}`;
+  if (DB.monthlyTransferDone && DB.monthlyTransferDone[key]) return;
+
+  /* Calculer le solde du mois précédent */
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear  = month === 1 ? year - 1 : year;
+  const prevTxs   = getTxByMonthYear(prevMonth, prevYear);
+  const solde     = soldeNet(prevTxs);
+
+  if (solde <= 0) {
+    /* Découvert — géré ailleurs */
+    _markTransferDone(key);
+    return;
+  }
+
+  /* Trouver la première catégorie d'épargne */
+  const epaCats = Object.keys(DB.budgets.epargne || {});
+  const epaCat  = epaCats[0] || 'Épargne';
+  const dateStr = `${year}-${String(month).padStart(2,'0')}-01`;
+
+  /* Créer transaction épargne auto */
+  const tKey = `epargne_auto_${year}_${month}`;
+  const exist = DB.transactions.find(t => t._transferKey === tKey);
+  if (!exist) {
+    DB.transactions.push({
+      id:           uid(),
+      _transferKey: tKey,
+      date:         dateStr,
+      label:        epaCat,
+      type:         'epargne',
+      owner:        'Commun',
+      amount:       solde,
+      comment:      `Transfert auto solde ${MONTHS_FR[prevMonth-1]}`
+    });
+    saveDB();
+  }
+  _markTransferDone(key);
+}
+
+function _markTransferDone(key) {
+  if (!DB.monthlyTransferDone) DB.monthlyTransferDone = {};
+  DB.monthlyTransferDone[key] = true;
+}
+
+/* ---- Vérification découvert ---- */
+function checkDecouvert() {
+  const now   = new Date();
+  const year  = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const txs   = getTxByMonthYear(month, year);
+  const tRev  = sumType(txs,'revenus');
+  const tDep  = sumType(txs,'depenses') + sumType(txs,'abonnements') + sumType(txs,'credits');
+  const solde = tRev - tDep;
+
+  if (solde >= 0) return null; /* Pas de découvert */
+
+  const montant = Math.abs(solde);
+
+  /* Vérifier si épargne disponible */
+  const epaTotal = Object.values(DB.epa_totals||{}).reduce((a,b)=>a+b,0);
+  if (epaTotal > 0) {
+    return { type:'epargne', montant, message:`Découvert couvert par l'épargne (-${fmt(montant)})` };
+  } else {
+    return { type:'credit', montant, message:`Découvert ${Math.round(montant)}` };
+  }
+}
+
+const p1 = () => DB.persons.person1;
+const p2 = () => DB.persons.person2;
+
+/* Retourne tous les noms de personnes actives pour les filtres */
+function getAllOwners() {
+  const list = [];
+  for (let i = 1; i <= (DB.persons.count || 2); i++) {
+    const n = DB.persons['person' + i];
+    if (n) list.push(n);
+  }
+  return list;
+}
+
+function amountForPerson(tx, owner) {
+  if (tx.owner==='Commun') return Math.abs(tx.amount)/2;
+  if (tx.owner===owner)    return Math.abs(tx.amount);
+  return 0;
+}
+function persoRealByCat(txs, type, owner) {
+  const r={};
+  txs.filter(t=>t.type===type).forEach(t=>{
+    /* Pour les revenus : afficher UNIQUEMENT les revenus propres à la personne
+       (ni Commun, ni les revenus d'une autre personne) */
+    if (type === 'revenus') {
+      if (t.owner !== owner) return; /* ignorer Commun et autres personnes */
+      r[t.label]=(r[t.label]||0)+Math.abs(t.amount);
+      return;
+    }
+    /* Pour les autres types : Commun divisé par 2 */
+    let share = Math.abs(t.amount);
+    if (t.owner==='Commun') share/=2;
+    else if (t.owner!==owner) return;
+    r[t.label]=(r[t.label]||0)+share;
+  });
+  return r;
+}
+
+const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+/* Retourne les transactions selon currentMonth et currentYear.
+   currentMonth = 0  → toute l'année
+   currentMonth = 1-12 → mois précis */
+function getTxCurrent() {
+  if (currentMonth === 0) return getTxByYear(currentYear);
+  return getTxByMonthYear(currentMonth, currentYear);
+}
+
+/* Label lisible de la période affichée */
+function currentPeriodLabel() {
+  if (currentMonth === 0) return 'Année ' + currentYear;
+  return MONTHS_FR[currentMonth - 1] + ' ' + currentYear;
+}
+
+function confirmDelete(msg) {
+  return confirm('⚠️ '+msg+'\n\nCette action est irréversible.');
+}
+
+/* ============================================================
+   BUDGET PAR PERSONNE — 50/50 sauf salaires
+   ============================================================ */
+
+/**
+ * Retourne le budget prévisionnel ajusté pour une personne donnée.
+ * Règle :
+ *   - Revenus "salaire" → 100 % pour la personne concernée, 0 % pour l'autre
+ *   - Tous les autres postes (dépenses, abonnements, crédits, épargne, projets) → 50 %
+ *
+ * @param {number|string} year  - Année
+ * @param {string}        owner - Nom de la personne (ex: "Marius")
+ * @returns {object} Budget clone avec montants divisés
+ */
+function getBudgetForPerson(year, owner) {
+  const base  = getBudgetForYear(year);
+  const clone = JSON.parse(JSON.stringify(base));
+
+  /* ---- Revenus : chaque salaire reste attaché à son propriétaire ---- */
+  if (clone.revenus) {
+    const salaryKeys = Object.keys(clone.revenus).filter(k =>
+      k.toLowerCase().includes('salaire') || k.toLowerCase().includes('extras')
+    );
+    const otherRevKeys = Object.keys(clone.revenus).filter(k =>
+      !salaryKeys.includes(k)
+    );
+
+    salaryKeys.forEach(k => {
+      /* Garder le budget salaire uniquement si la clé contient le nom de la personne
+         ou s'il n'y a aucun indicateur de personne (budget commun générique) */
+      const kLow       = k.toLowerCase();
+      const ownerLow   = owner.toLowerCase();
+      const otherOwner = getActivePersons().find(p => p.name !== owner)?.name || '';
+      const otherLow   = otherOwner.toLowerCase();
+
+      const belongsToOwner = kLow.includes(ownerLow);
+      const belongsToOther = kLow.includes(otherLow) && !belongsToOwner;
+
+      if (belongsToOther) {
+        /* Ce salaire appartient à l'autre personne → 0 pour owner */
+        clone.revenus[k] = 0;
+      }
+      /* Sinon garder 100 % (salaire propre ou générique) */
+    });
+
+    /* Revenus autres (non-salaire) → 50 % */
+    otherRevKeys.forEach(k => {
+      clone.revenus[k] = (clone.revenus[k] || 0) / 2;
+    });
+  }
+
+  /* ---- Toutes les autres catégories → 50 % ---- */
+  ['depenses', 'abonnements', 'credits', 'epargne', 'projets'].forEach(type => {
+    if (!clone[type]) return;
+    Object.keys(clone[type]).forEach(k => {
+      clone[type][k] = (clone[type][k] || 0) / 2;
+    });
+  });
+
+  return clone;
+}
