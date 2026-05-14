@@ -265,7 +265,7 @@ function confirmDelete(msg) {
  *   - Tous les autres postes (dépenses, abonnements, crédits, épargne, projets) → 50 %
  *
  * @param {number|string} year  - Année
- * @param {string}        owner - Nom de la personne (ex: "Marius")
+ * @param {string}        owner - Nom de la personne (ex: "Alice")
  * @returns {object} Budget clone avec montants divisés
  */
 function getBudgetForPerson(year, owner) {

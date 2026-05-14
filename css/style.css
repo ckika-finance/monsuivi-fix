@@ -785,7 +785,7 @@ html, body {
 .abo-meta   { display: flex; flex-wrap: wrap; gap: 5px; font-size: 11px; color: var(--color-text-tertiary); align-items: center; }
 .abo-owner-badge { padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 500; }
 .abo-commun { background: var(--color-background-primary); color: var(--color-text-secondary); border: 0.5px solid var(--color-border-tertiary); }
-.abo-marius { background: var(--blue-lt);  color: #185FA5; }
+.abo-p1 { background: var(--blue-lt);  color: #185FA5; }
 .abo-sam    { background: var(--pink-lt);  color: #72243E; }
 .abo-p3     { background: var(--amber-lt); color: #633806; }
 .abo-p4     { background: var(--purple-lt);color: #3C3489; }

@@ -21,9 +21,9 @@ const KEYS = {
 
 /* Structure persons dynamique : count + jusqu'à 4 personnes */
 const DEFAULT_PERSONS_DYNAMIC = {
-  count: 2,
-  person1: 'Marius',
-  person2: 'Samantha',
+  count: 0,
+  person1: null,
+  person2: null,
   person3: null,
   person4: null
 };
@@ -101,24 +101,9 @@ async function sbSet(key, value) {
    MIGRATION — Lecture des anciennes clés sans préfixe user_id
    ============================================================ */
 async function sbGetLegacy() {
-  /* Lit TOUTES les clés sans filtre pour trouver les anciennes données non préfixées */
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/${TABLE}?select=key,value`,
-      { headers: getAuthHeaders() }
-    );
-    if (!res.ok) return {};
-    const rows = await res.json();
-    const map  = {};
-    const uid  = getUserId();
-    rows.forEach(r => {
-      /* Garder uniquement les clés NON préfixées par un user_id
-         (les anciennes clés ressemblent à "monsuivi_tx", pas "uuid:monsuivi_tx") */
-      const isLegacy = !r.key.includes(':');
-      if (isLegacy) map[r.key] = r.value;
-    });
-    return map;
-  } catch(e) { return {}; }
+  /* DESACTIVE — migration auto des donnees non prefixees desactivee.
+     Chaque compte est strictement isole par user_id. */
+  return {};
 }
 
 /* Migre les données legacy vers les clés préfixées + marque onboarding comme fait */
@@ -207,16 +192,9 @@ async function loadDB() {
       const hadLocal = _loadLocal();
 
       if (!hadLocal) {
-        /* Nouveau compte totalement vierge */
-        DB.transactions = [];
-        DB.budgets      = JSON.parse(JSON.stringify(DEFAULT_BUDGETS));
-        DB.budget_prev  = {};
-        DB.abonnements  = [];
-        DB.epa_totals   = { ...DEFAULT_EPA_TOTALS };
-        DB.pro_totals   = { ...DEFAULT_PRO_TOTALS };
-        DB.persons      = { ...DEFAULT_PERSONS_DYNAMIC };
-        DB.prets        = [];
-        DB.onboarding   = false;
+        /* Nouveau compte totalement vierge — aucune donnée préremplie */
+        _initEmptyDB();
+        DB.onboarding = false; /* Lance l'onboarding */
       } else {
         /* Cache local présent mais pas de remote → hors ligne */
         setSyncBadge('📴 Hors ligne');
@@ -238,6 +216,30 @@ async function loadDB() {
     checkMonthlyTransfer();
     render();
   }
+}
+
+/* ============================================================
+   INIT COMPTE VIERGE — aucune donnée, structure minimale
+   ============================================================ */
+function _initEmptyDB() {
+  DB.transactions = [];
+  /* Budgets : structure vide, sans catégories préremplies.
+     Les catégories seront créées via l'onboarding ou manuellement. */
+  DB.budgets = {
+    revenus:     {},
+    depenses:    {},
+    abonnements: {},
+    credits:     {},
+    epargne:     {},
+    projets:     {}
+  };
+  DB.budget_prev = {};
+  DB.abonnements = [];
+  DB.epa_totals  = {};
+  DB.pro_totals  = {};
+  DB.persons     = { count: 0, person1: null, person2: null, person3: null, person4: null };
+  DB.prets       = [];
+  DB.monthlyTransferDone = {};
 }
 
 /* Migration budget : ancienne clé 'factures' → 'abonnements' */
@@ -338,6 +340,8 @@ function _localKey(k) {
 
 function _saveLocal() {
   try {
+    /* Ne sauvegarder en local que si une session est active (pour préfixer les clés) */
+    if (!getUserId()) return;
     localStorage.setItem(_localKey(KEYS.tx),         JSON.stringify(DB.transactions));
     localStorage.setItem(_localKey(KEYS.bud),        JSON.stringify(DB.budgets));
     localStorage.setItem(_localKey(KEYS.bud_prev),   JSON.stringify(DB.budget_prev));
@@ -352,6 +356,10 @@ function _saveLocal() {
 
 function _loadLocal() {
   try {
+    /* Sécurité : ne charger le localStorage que si une session user est active.
+       Sans user_id, _localKey retourne la clé brute → risque de lire des données
+       d'un autre compte (ex: connexion sur le même navigateur). */
+    if (!getUserId()) return false;
     const tx = localStorage.getItem(_localKey(KEYS.tx));
     if (!tx) return false;
     DB.transactions = _parse(tx,                                                [...DEFAULT_TRANSACTIONS]);

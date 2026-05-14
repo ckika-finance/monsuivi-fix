@@ -105,6 +105,17 @@ async function authLogout() {
       headers: { 'apikey': ANON_KEY, 'Authorization': 'Bearer ' + SESSION.access_token }
     }).catch(() => {});
   }
+
+  /* Purger le cache localStorage lié à cet utilisateur pour éviter
+     toute fuite de données vers un prochain compte sur le même appareil */
+  const uid = SESSION?.user?.id || SESSION?.sub;
+  if (uid) {
+    const prefix = uid + ':';
+    Object.keys(localStorage)
+      .filter(k => k.startsWith(prefix))
+      .forEach(k => localStorage.removeItem(k));
+  }
+
   saveSession(null);
   showLoginScreen();
 }

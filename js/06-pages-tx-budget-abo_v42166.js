@@ -183,7 +183,7 @@ function renderAbonnements() {
   function aboBadge(owner) {
     if(owner==='Commun') return 'abo-commun';
     const persons=getActivePersons(), idx=persons.findIndex(p=>p.name===owner);
-    return ['abo-marius','abo-sam','abo-p3','abo-p4'][idx]||'abo-commun';
+    return ['abo-p1','abo-p2','abo-p3','abo-p4'][idx]||'abo-commun';
   }
 
   /* Couleur engagement selon avancement */
