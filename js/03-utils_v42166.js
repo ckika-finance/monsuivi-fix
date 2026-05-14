@@ -33,14 +33,15 @@ const budgetStatus = (r,b) => { if(b<=0) return 'OK'; const v=r/b; return v>1?'D
 function soldeNet(txs) {
   return sumType(txs,'revenus') - sumType(txs,'depenses') - sumType(txs,'abonnements') - sumType(txs,'credits');
 }
-/* Solde net pour une personne (Commun /2) */
+/* Solde net pour une personne — Commun divisé par le nombre réel de personnes */
 function soldeNetForPerson(txs, owner) {
   const types = ['revenus','depenses','abonnements','credits'];
+  const n = getPersonCount();
   let total = 0;
   types.forEach(type => {
     txs.filter(t=>t.type===type).forEach(t => {
       let share = Math.abs(t.amount);
-      if (t.owner==='Commun') share /= 2;
+      if (t.owner==='Commun') share /= n;
       else if (t.owner!==owner) return;
       total += (type==='revenus') ? share : -share;
     });
@@ -49,6 +50,18 @@ function soldeNetForPerson(txs, owner) {
 }
 
 /* "abonnements" → libellé "Abonnement" partout dans l'UI */
+/* Nombre réel de personnes dans le compte (min 1 pour éviter division par 0) */
+function getPersonCount() {
+  return Math.max(1, getActivePersons().length);
+}
+
+/* Label dynamique pour l'option "Commun" dans les sélecteurs */
+function communLabel() {
+  const n = getPersonCount();
+  if (n <= 1) return 'Commun';
+  return 'Commun (' + n + ' personne' + (n > 1 ? 's' : '') + ')';
+}
+
 const TYPE_LABELS     = {revenus:'Revenu',depenses:'Dépense',abonnements:'Abonnement',credits:'Crédit',epargne:'Épargne',projets:'Projet'};
 const TYPE_COLORS     = {revenus:'#1D9E75',depenses:'#D85A30',abonnements:'#378ADD',credits:'#BA7517',epargne:'#534AB7',projets:'#D4537E'};
 const TYPE_BADGE      = {revenus:'badge-rev',depenses:'badge-dep',abonnements:'badge-abo',credits:'badge-cre',epargne:'badge-epa',projets:'badge-pro'};
@@ -211,7 +224,7 @@ function getAllOwners() {
 }
 
 function amountForPerson(tx, owner) {
-  if (tx.owner==='Commun') return Math.abs(tx.amount)/2;
+  if (tx.owner==='Commun') return Math.abs(tx.amount) / getPersonCount();
   if (tx.owner===owner)    return Math.abs(tx.amount);
   return 0;
 }
@@ -225,9 +238,9 @@ function persoRealByCat(txs, type, owner) {
       r[t.label]=(r[t.label]||0)+Math.abs(t.amount);
       return;
     }
-    /* Pour les autres types : Commun divisé par 2 */
+    /* Pour les autres types : Commun divisé par le nombre réel de personnes */
     let share = Math.abs(t.amount);
-    if (t.owner==='Commun') share/=2;
+    if (t.owner==='Commun') share /= getPersonCount();
     else if (t.owner!==owner) return;
     r[t.label]=(r[t.label]||0)+share;
   });
@@ -261,8 +274,8 @@ function confirmDelete(msg) {
 /**
  * Retourne le budget prévisionnel ajusté pour une personne donnée.
  * Règle :
- *   - Revenus "salaire" → 100 % pour la personne concernée, 0 % pour l'autre
- *   - Tous les autres postes (dépenses, abonnements, crédits, épargne, projets) → 50 %
+ *   - Revenus "salaire" → 100 % pour la personne concernée, 0 % pour les autres
+ *   - Tous les autres postes → divisés par le nombre réel de personnes
  *
  * @param {number|string} year  - Année
  * @param {string}        owner - Nom de la personne (ex: "Alice")
@@ -299,17 +312,19 @@ function getBudgetForPerson(year, owner) {
       /* Sinon garder 100 % (salaire propre ou générique) */
     });
 
-    /* Revenus autres (non-salaire) → 50 % */
+    /* Revenus autres (non-salaire) → divisés par le nombre de personnes */
+    const n = getPersonCount();
     otherRevKeys.forEach(k => {
-      clone.revenus[k] = (clone.revenus[k] || 0) / 2;
+      clone.revenus[k] = (clone.revenus[k] || 0) / n;
     });
   }
 
-  /* ---- Toutes les autres catégories → 50 % ---- */
+  /* ---- Toutes les autres catégories → divisées par le nombre de personnes ---- */
+  const nPersons = getPersonCount();
   ['depenses', 'abonnements', 'credits', 'epargne', 'projets'].forEach(type => {
     if (!clone[type]) return;
     Object.keys(clone[type]).forEach(k => {
-      clone[type][k] = (clone[type][k] || 0) / 2;
+      clone[type][k] = (clone[type][k] || 0) / nPersons;
     });
   });
 

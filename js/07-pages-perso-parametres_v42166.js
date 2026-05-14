@@ -42,7 +42,7 @@ function renderPerso(owner) {
     <div class="perso-avatar" style="background:${av.bg};color:${av.text}">${init}</div>
     <div>
       <div class="perso-name">${owner}</div>
-      <div class="perso-sub">Vue personnelle · ${currentPeriodLabel()}${getActivePersons().length>1?' · Commun réparti à 50%':''}</div>
+      <div class="perso-sub">Vue personnelle · ${currentPeriodLabel()}${getActivePersons().length>1?' · Commun ÷ '+getPersonCount()+' personnes':''}</div>
     </div>
     <div class="perso-solde">
       <div class="perso-solde-label">Solde net</div>
@@ -69,19 +69,24 @@ function renderPerso(owner) {
         <span style="font-size:12px;font-weight:500;color:#D85A30">${fmt(kpiData.find(k=>k.type==='depenses')?.total||0)}</span>
       </div>
       <div class="card-body">
-        ${Object.keys(bud.depenses||{}).map(cat=>{
-          const r=depReals[cat]||0, b=bud.depenses[cat]||0, over=r>b&&b>0;
-          const maxV=Math.max(r,b,1);
-          return `<div class="prog-row">
-            <div class="prog-head">
-              <span class="prog-name ${over?'over':''}">${cat}${over?' ▲':''}</span>
-              <span class="prog-val">${fmtS(r)} / ${fmtS(b)}</span>
-            </div>
-            <div class="prog-track">
-              <div class="prog-real" style="width:${Math.min(100,Math.round(r/maxV*100))}%;background:${over?'#D85A30':'#D85A30'}"></div>
-            </div>
-          </div>`;
-        }).join('')||'<div style="color:#bbb;font-size:12px;text-align:center;padding:8px">Aucune dépense</div>'}
+        ${(()=>{
+          const cats = Object.keys(bud.depenses||{});
+          const rows = cats.map(cat=>{
+            const r=depReals[cat]||0, b=bud.depenses[cat]||0;
+            if (r===0 && b===0) return ''; /* masquer si aucune donnée pour cette personne */
+            const over=r>b&&b>0, maxV=Math.max(r,b,1);
+            return `<div class="prog-row">
+              <div class="prog-head">
+                <span class="prog-name ${over?'over':''}">${cat}${over?' ▲':''}</span>
+                <span class="prog-val">${fmtS(r)} / ${fmtS(b)}</span>
+              </div>
+              <div class="prog-track">
+                <div class="prog-real" style="width:${Math.min(100,Math.round(r/maxV*100))}%;background:${over?'#D85A30':'#D85A30'}"></div>
+              </div>
+            </div>`;
+          }).filter(Boolean);
+          return rows.length ? rows.join('') : '<div style="color:#bbb;font-size:12px;text-align:center;padding:8px">Aucune dépense</div>';
+        })()}
       </div>
     </div>
 
@@ -91,19 +96,24 @@ function renderPerso(owner) {
         <span style="font-size:12px;font-weight:500;color:#378ADD">${fmt(kpiData.find(k=>k.type==='abonnements')?.total||0)}</span>
       </div>
       <div class="card-body">
-        ${Object.keys(bud.abonnements||{}).map(cat=>{
-          const r=facReals[cat]||0, b=bud.abonnements[cat]||0;
-          const maxV=Math.max(r,b,1);
-          return `<div class="prog-row">
-            <div class="prog-head">
-              <span class="prog-name">${cat}</span>
-              <span class="prog-val">${fmtS(r)} / ${fmtS(b)}</span>
-            </div>
-            <div class="prog-track">
-              <div class="prog-real" style="width:${Math.min(100,Math.round(r/maxV*100))}%;background:#378ADD"></div>
-            </div>
-          </div>`;
-        }).join('')||'<div style="color:#bbb;font-size:12px;text-align:center;padding:8px">Aucun abonnement</div>'}
+        ${(()=>{
+          const cats = Object.keys(bud.abonnements||{});
+          const rows = cats.map(cat=>{
+            const r=facReals[cat]||0, b=bud.abonnements[cat]||0;
+            if (r===0 && b===0) return ''; /* masquer si aucune donnée */
+            const maxV=Math.max(r,b,1);
+            return `<div class="prog-row">
+              <div class="prog-head">
+                <span class="prog-name">${cat}</span>
+                <span class="prog-val">${fmtS(r)} / ${fmtS(b)}</span>
+              </div>
+              <div class="prog-track">
+                <div class="prog-real" style="width:${Math.min(100,Math.round(r/maxV*100))}%;background:#378ADD"></div>
+              </div>
+            </div>`;
+          }).filter(Boolean);
+          return rows.length ? rows.join('') : '<div style="color:#bbb;font-size:12px;text-align:center;padding:8px">Aucun abonnement</div>';
+        })()}
       </div>
     </div>
 

@@ -64,7 +64,7 @@ function openTxModal(txId) {
         <label class="form-label">Propriétaire</label>
         <select class="form-input" id="f-owner">
           ${getAllOwners().map(name=>`<option value="${name}" ${existing?.owner===name?'selected':''}>${name}</option>`).join('')}
-          <option value="Commun" ${(!existing||existing?.owner==='Commun')?'selected':''}>Commun</option>
+          <option value="Commun" ${(!existing||existing?.owner==='Commun')?'selected':''}>${communLabel()}</option>
         </select>
       </div>`
         : `<input type="hidden" id="f-owner" value="${(getAllOwners()[0])||'Commun'}">`
@@ -198,7 +198,7 @@ function openAboModal(aboId) {
       <label class="form-label">Propriétaire</label>
       <select class="form-input" id="ab-owner">
         ${getAllOwners().map(name=>`<option value="${name}" ${existing?.owner===name?'selected':''}>${name}</option>`).join('')}
-        <option value="Commun" ${(!existing||existing?.owner==='Commun')?'selected':''}>Commun</option>
+        <option value="Commun" ${(!existing||existing?.owner==='Commun')?'selected':''}>${communLabel()}</option>
       </select>
     </div>`
       : `<input type="hidden" id="ab-owner" value="${(getAllOwners()[0])||'Commun'}">`
@@ -330,7 +330,7 @@ function openPretModal() {
       ? `<div class="form-group">
       <label class="form-label">Titulaire</label>
       <select class="form-input" id="pt-owner">
-        <option value="Commun">Commun (les deux)</option>
+        <option value="Commun">${communLabel()}</option>
         ${getAllOwners().map(name=>`<option value="${name}">${name}</option>`).join('')}
       </select>
     </div>`
