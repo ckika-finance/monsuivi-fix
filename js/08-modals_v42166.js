@@ -59,13 +59,16 @@ function openTxModal(txId) {
           ${typeOptions.map(t=>`<option value="${t}" ${t===selType?'selected':''}>${t==='abonnements'?'Abonnement':TYPE_LABELS[t]}</option>`).join('')}
         </select>
       </div>
-      ${getActivePersons().length>1?`<div class="form-group" style="flex:1">
+      ${getActivePersons().length>1
+        ? `<div class="form-group" style="flex:1">
         <label class="form-label">Propriétaire</label>
         <select class="form-input" id="f-owner">
-          ${getAllOwners().map(name=>\`<option value="${name}" ${existing?.owner===name?'selected':''} >${name}</option>\`).join('')}
+          ${getAllOwners().map(name=>`<option value="${name}" ${existing?.owner===name?'selected':''}>${name}</option>`).join('')}
           <option value="Commun" ${(!existing||existing?.owner==='Commun')?'selected':''}>Commun</option>
         </select>
-      </div>`:'<input type="hidden" id="f-owner" value="'+((getAllOwners()[0])||'Commun')+'">'  }
+      </div>`
+        : `<input type="hidden" id="f-owner" value="${(getAllOwners()[0])||'Commun'}">`
+      }
     </div>
     <div class="form-group">
       <label class="form-label">Catégorie</label>
@@ -190,13 +193,16 @@ function openAboModal(aboId) {
       </div>
     </div>
 
-    ${getActivePersons().length>1?`<div class="form-group">
+    ${getActivePersons().length>1
+      ? `<div class="form-group">
       <label class="form-label">Propriétaire</label>
       <select class="form-input" id="ab-owner">
-        ${getAllOwners().map(name=>\`<option value="${name}" ${existing?.owner===name?'selected':''}>${name}</option>\`).join('')}
+        ${getAllOwners().map(name=>`<option value="${name}" ${existing?.owner===name?'selected':''}>${name}</option>`).join('')}
         <option value="Commun" ${(!existing||existing?.owner==='Commun')?'selected':''}>Commun</option>
       </select>
-    </div>`:'<input type="hidden" id="ab-owner" value="'+((getAllOwners()[0])||'Commun')+'">'  }
+    </div>`
+      : `<input type="hidden" id="ab-owner" value="${(getAllOwners()[0])||'Commun'}">`
+    }
 
     <!-- Engagement -->
     <div class="form-group">
@@ -320,13 +326,16 @@ function openPretModal() {
       <input class="form-input" type="text" id="pt-nom" placeholder="Ex: Crédit Logement BNP">
     </div>
 
-    ${getActivePersons().length>1?`<div class="form-group">
+    ${getActivePersons().length>1
+      ? `<div class="form-group">
       <label class="form-label">Titulaire</label>
       <select class="form-input" id="pt-owner">
         <option value="Commun">Commun (les deux)</option>
-        ${getAllOwners().map(name=>\`<option value="${name}">${name}</option>\`).join('')}
+        ${getAllOwners().map(name=>`<option value="${name}">${name}</option>`).join('')}
       </select>
-    </div>`:'<input type="hidden" id="pt-owner" value="'+((getAllOwners()[0])||'Commun')+'">'  }
+    </div>`
+      : `<input type="hidden" id="pt-owner" value="${(getAllOwners()[0])||'Commun'}">`
+    }
 
     <div class="form-row">
       <div class="form-group" style="flex:1">
