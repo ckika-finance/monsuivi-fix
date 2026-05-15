@@ -119,9 +119,21 @@ function renderPerso(owner) {
 
   </div>
 
-  <!-- Mini tableaux -->
+  <!-- Mini tableaux — uniquement catégories avec données pour cette personne -->
   <div class="tables-grid">
-    ${types.map(type=>renderMiniTable(type==='abonnements'?'Abonnements':TYPE_LABELS[type]+'s', TYPE_HEADER_CLS[type], bud[type]||{}, persoRealByCat(txs,type,owner))).join('')}
+    ${types.map(type=>{
+      const reals = persoRealByCat(txs,type,owner);
+      const budCats = bud[type]||{};
+      /* Garder seulement les catégories ayant au moins données réelles ou budget */
+      const activeCats = Object.keys(budCats).filter(cat=>(reals[cat]||0)>0||(budCats[cat]||0)>0);
+      if(activeCats.length===0 && Object.values(reals).every(v=>v===0)) return '';
+      const filteredBud = {};
+      activeCats.forEach(cat=>{ filteredBud[cat]=budCats[cat]||0; });
+      /* Ajouter les catégories avec réels mais sans budget */
+      Object.keys(reals).forEach(cat=>{ if(!filteredBud[cat]&&reals[cat]>0) filteredBud[cat]=0; });
+      if(Object.keys(filteredBud).length===0) return '';
+      return renderMiniTable(type==='abonnements'?'Abonnements':TYPE_LABELS[type]+'s', TYPE_HEADER_CLS[type], filteredBud, reals);
+    }).filter(Boolean).join('')}
   </div>`;
 }
 

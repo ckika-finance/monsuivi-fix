@@ -70,7 +70,7 @@ function renderTransactions() {
       <select class="filter-select" onchange="filterOwner=this.value;render()">
         <option value="all" ${filterOwner==='all'?'selected':''}>Tous</option>
         ${getAllOwners().map(n=>`<option value="${n}" ${filterOwner===n?'selected':''}>${n}</option>`).join('')}
-        <option value="Commun" ${filterOwner==='Commun'?'selected':''}>Commun</option>
+        <option value="Commun" ${filterOwner==='Commun'?'selected':''}>${communLabel()}</option>
       </select>` : ''}
     </div>
 

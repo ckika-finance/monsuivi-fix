@@ -216,10 +216,9 @@ const p2 = () => DB.persons.person2;
 /* Retourne tous les noms de personnes actives pour les filtres */
 function getAllOwners() {
   const list = [];
-  for (let i = 1; i <= (DB.persons.count || 2); i++) {
-    const n = DB.persons['person' + i];
-    if (n) list.push(n);
-  }
+  getActivePersons().forEach(p => {
+    if (p.name) list.push(p.name);
+  });
   return list;
 }
 

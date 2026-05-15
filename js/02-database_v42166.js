@@ -396,7 +396,8 @@ function ensureBudgetYear(y) {
 /* ---- Helpers personnes actives ---- */
 function getActivePersons() {
   const list = [];
-  for (let i = 1; i <= (DB.persons.count || 2); i++) {
+  /* Toujours parcourir les 4 slots — count n'est plus un fallback hardcodé à 2 */
+  for (let i = 1; i <= 4; i++) {
     const name = DB.persons['person' + i];
     if (name) list.push({ key: 'person' + i, name });
   }
