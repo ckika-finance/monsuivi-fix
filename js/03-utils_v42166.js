@@ -67,6 +67,52 @@ const TYPE_COLORS     = {revenus:'#1D9E75',depenses:'#D85A30',abonnements:'#378A
 const TYPE_BADGE      = {revenus:'badge-rev',depenses:'badge-dep',abonnements:'badge-abo',credits:'badge-cre',epargne:'badge-epa',projets:'badge-pro'};
 const TYPE_HEADER_CLS = {revenus:'rev',depenses:'dep',abonnements:'abo',credits:'cre',epargne:'epa',projets:'pro'};
 
+/* ============================================================
+   CALCUL AUTOMATIQUE CAPITAL RESTANT + DURÉE RESTANTE
+   Simule les mensualités déjà passées depuis la date de début
+   ============================================================ */
+
+/**
+ * Calcule le capital restant et la durée restante à ce jour.
+ * @param {number} capitalInitial - Capital à la souscription
+ * @param {number} tauxAnnuel     - Taux annuel en %
+ * @param {number} mensualite     - Mensualité fixe
+ * @param {number} dureeTotal     - Durée totale en mois
+ * @param {string} dateDebutStr   - "YYYY-MM-DD" ou "YYYY-MM-01"
+ * @returns {{ capitalRestant, dureeRestante, moisEcoules }}
+ */
+function _computeCapitalActuel(capitalInitial, tauxAnnuel, mensualite, dureeTotal, dateDebutStr) {
+  if (!dateDebutStr || !capitalInitial || !mensualite) {
+    return { capitalRestant: capitalInitial || 0, dureeRestante: dureeTotal || 0, moisEcoules: 0 };
+  }
+
+  const today = new Date();
+  const debut = new Date(dateDebutStr);
+
+  /* Nombre de mensualités déjà passées (inclure le mois courant) */
+  const moisEcoules = Math.max(0,
+    (today.getFullYear() - debut.getFullYear()) * 12 +
+    (today.getMonth() - debut.getMonth())
+  );
+
+  if (moisEcoules === 0) {
+    return { capitalRestant: capitalInitial, dureeRestante: dureeTotal, moisEcoules: 0 };
+  }
+
+  const tauxMens = (tauxAnnuel || 0) / 100 / 12;
+  let capital = capitalInitial;
+
+  const moisAPasser = Math.min(moisEcoules, dureeTotal);
+  for (let i = 0; i < moisAPasser && capital > 0.01; i++) {
+    const partInt = Math.round(capital * tauxMens * 100) / 100;
+    const partCap = Math.min(capital, Math.round((mensualite - partInt) * 100) / 100);
+    capital = Math.max(0, Math.round((capital - partCap) * 100) / 100);
+  }
+
+  const dureeRestante = Math.max(0, dureeTotal - moisEcoules);
+  return { capitalRestant: capital, dureeRestante, moisEcoules };
+}
+
 /* ---- Injection automatique des abonnements comme transactions ---- */
 function injectAbonnementsTransactions() {
   const now   = new Date();
@@ -99,40 +145,46 @@ function injectAbonnementsTransactions() {
 }
 
 /* ---- Injection automatique des mensualités de prêts ---- */
+/* Injecte UNE transaction par mois pour chaque prêt, depuis startDate jusqu'à aujourd'hui */
 function injectPretsTransactions() {
-  const now   = new Date();
-  const year  = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const dateStr = `${year}-${String(month).padStart(2,'0')}-01`;
+  const today = new Date();
+  const todayYear  = today.getFullYear();
+  const todayMonth = today.getMonth() + 1;
   let changed = false;
 
   DB.prets.forEach(pret => {
-    /* Ne pas injecter si le prêt n'a pas encore commencé ce mois */
-    if (pret.startDate) {
-      const start = new Date(pret.startDate);
-      const startYear  = start.getFullYear();
-      const startMonth = start.getMonth() + 1;
-      if (year < startYear || (year === startYear && month < startMonth)) return;
+    if (!pret.startDate) return; /* Ignorer les prêts sans date de début */
+
+    const start      = new Date(pret.startDate);
+    const startYear  = start.getFullYear();
+    const startMonth = start.getMonth() + 1;
+    const creditCat  = pret.type === 'Logement' ? 'Habitation' : (pret.type || 'Conso');
+
+    /* Parcourir chaque mois de startDate jusqu'à aujourd'hui inclus */
+    let y = startYear, m = startMonth;
+    while (y < todayYear || (y === todayYear && m <= todayMonth)) {
+      const key   = `pret_auto_${pret.id}_${y}_${m}`;
+      const exist = DB.transactions.find(t => t._pretKey === key);
+
+      if (!exist) {
+        const dateStr = `${y}-${String(m).padStart(2,'0')}-01`;
+        DB.transactions.push({
+          id:       uid(),
+          _pretKey: key,
+          date:     dateStr,
+          label:    creditCat,
+          type:     'credits',
+          owner:    pret.owner || 'Commun',
+          amount:   -Math.abs(pret.mensualite),
+          comment:  `Mensualité ${pret.nom}`
+        });
+        changed = true;
+      }
+
+      /* Avancer d'un mois */
+      m++;
+      if (m > 12) { m = 1; y++; }
     }
-
-    const key   = `pret_auto_${pret.id}_${year}_${month}`;
-    const exist = DB.transactions.find(t => t._pretKey === key);
-    if (exist) return;
-
-    /* Catégorie crédit = type du prêt (Auto, Conso, Habitation) */
-    const creditCat = pret.type === 'Logement' ? 'Habitation' : (pret.type || 'Conso');
-
-    DB.transactions.push({
-      id:       uid(),
-      _pretKey: key,
-      date:     dateStr,
-      label:    creditCat,
-      type:     'credits',
-      owner:    pret.owner || 'Commun',
-      amount:   -Math.abs(pret.mensualite),
-      comment:  `Mensualité ${pret.nom}`
-    });
-    changed = true;
   });
 
   if (changed && typeof saveDB === 'function') saveDB();

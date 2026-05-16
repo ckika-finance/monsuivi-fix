@@ -14,20 +14,24 @@ function moisEcoules(pret) {
 }
 
 function capitalActuel(pret) {
-  if (!pret.startDate) return pret.capitalRestant;
-  const n = moisEcoules(pret);
-  const taux = pret.tauxAnnuel/100/12;
-  let cap = pret.capitalRestant;
-  for (let i=0; i<n && cap>0.01; i++) {
-    const interet = Math.round(cap*taux*100)/100;
-    const capPart = Math.min(cap, Math.round((pret.mensualite-interet)*100)/100);
-    cap = Math.max(0, Math.round((cap-capPart)*100)/100);
-  }
-  return cap;
+  /* Si capitalInitial est disponible (nouveau format), on recalcule depuis le début.
+     Sinon on utilise capitalRestant (ancien format) sans recalcul. */
+  if (!pret.startDate) return pret.capitalRestant || 0;
+  const capBase = pret.capitalInitial || pret.capitalRestant || 0;
+  const { capitalRestant } = _computeCapitalActuel(
+    capBase, pret.tauxAnnuel || 0, pret.mensualite, pret.dureeTotal || pret.dureeRestante || 0, pret.startDate
+  );
+  return capitalRestant;
 }
 
 function dureeRestanteActuelle(pret) {
-  return Math.max(0, pret.dureeRestante - moisEcoules(pret));
+  if (!pret.startDate) return pret.dureeRestante || 0;
+  const durBase = pret.dureeTotal || pret.dureeRestante || 0;
+  const { dureeRestante } = _computeCapitalActuel(
+    pret.capitalInitial || pret.capitalRestant || 0,
+    pret.tauxAnnuel || 0, pret.mensualite, durBase, pret.startDate
+  );
+  return dureeRestante;
 }
 
 function fmtStartDate(pret) {
@@ -234,22 +238,26 @@ function renderPrets() {
     <div class="section-header"><span class="section-title">Avancement du remboursement</span></div>
     <div style="padding:16px">
       ${DB.prets.map(p=>{
+        const cIni = p.capitalInitial || p.capitalRestant || 0;
         const cCur = capitalActuel(p);
+        const paid = Math.max(0, cIni - cCur);
+        const pct  = cIni>0 ? Math.min(100, Math.max(0, Math.round(paid/cIni*100))) : 0;
         const n    = moisEcoules(p);
-        const amF  = buildAmortissement(p, p.capitalRestant, p.dureeRestante);
-        const paid = amF.slice(0,n).reduce((s,r)=>s+r.partCapital,0);
-        const cIni = cCur + paid;
-        const pct  = cIni>0 ? Math.min(100,Math.round(paid/cIni*100)) : 0;
+        const durRestante = dureeRestanteActuelle(p);
         return `<div class="prog-row" style="margin-bottom:16px">
           <div class="prog-header" style="margin-bottom:6px">
-            <span style="font-weight:500">${p.nom} ${p.type?`(${p.type})`:''}</span>
-            <span style="color:#888">${fmt(cCur)} restants · ${dureeRestanteActuelle(p)} mois</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-weight:500">${p.nom}${p.type?' ('+p.type+')':''}</span>
+              ${getActivePersons().length>1?`<span style="font-size:10px;background:var(--color-background-secondary);padding:2px 7px;border-radius:10px;color:#888">${p.owner||'Commun'}</span>`:''}
+            </div>
+            <span style="color:#888">${fmt(cCur)} restants · ${durRestante} mois</span>
           </div>
           <div class="prog-track" style="height:10px;border-radius:6px">
             <div class="prog-real" style="width:${pct}%;background:${pct>75?'#1D9E75':pct>40?'#378ADD':'#BA7517'};border-radius:6px"></div>
           </div>
-          <div style="font-size:11px;color:#aaa;margin-top:4px;text-align:right">
-            ${pct}% remboursé${p.startDate?` · Démarré ${fmtStartDate(p)}`:''}
+          <div style="font-size:11px;color:#aaa;margin-top:4px;display:flex;justify-content:space-between">
+            <span>${p.startDate?'Démarré '+fmtStartDate(p)+(n>0?' · '+n+' mensualité'+(n>1?'s':'')+' passée'+(n>1?'s':''):''):'Date inconnue'}</span>
+            <span>${pct}% remboursé</span>
           </div>
         </div>`;
       }).join('')}

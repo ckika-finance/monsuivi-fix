@@ -62,7 +62,8 @@ function openTxModal(txId) {
       ${getActivePersons().length>1
         ? `<div class="form-group" style="flex:1">
         <label class="form-label">Propriétaire</label>
-        <select class="form-input" id="f-owner">
+        <select class="form-input" id="f-owner"
+          onchange="if(document.getElementById('f-type')?.value==='revenus') updateCatOptions('revenus','')">
           ${getAllOwners().map(name=>`<option value="${name}" ${existing?.owner===name?'selected':''}>${name}</option>`).join('')}
           <option value="Commun" ${(!existing||existing?.owner==='Commun')?'selected':''}>${communLabel()}</option>
         </select>
@@ -99,6 +100,10 @@ function openTxModal(txId) {
 
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   document.body.appendChild(overlay);
+  /* Initialiser les catégories selon le type initial et le propriétaire */
+  if (selType === 'revenus') {
+    setTimeout(() => updateCatOptions('revenus', existing?.label || ''), 0);
+  }
 }
 
 /* Retourne les catégories triées pour un type donné */
@@ -123,7 +128,24 @@ function _getCats(type) {
 
 function updateCatOptions(type, currentLabel) {
   const sel = document.getElementById('f-label-sel'); if(!sel) return;
-  const cats = _getCats(type);
+  let cats;
+  if (type === 'revenus') {
+    /* Pour les revenus : "Salaire [Nom du propriétaire sélectionné]" + autres revenus */
+    const ownerSel = document.getElementById('f-owner');
+    const owner    = ownerSel ? ownerSel.value : (getAllOwners()[0] || '');
+    if (owner && owner !== 'Commun') {
+      cats = [`Salaire ${owner}`];
+    } else {
+      /* Commun ou pas de propriétaire : liste générique */
+      cats = getAllOwners().map(n => `Salaire ${n}`);
+    }
+    /* Ajouter les catégories budget existantes (hors salaires) */
+    const budCats = Object.keys(DB.budgets['revenus']||{})
+      .filter(k => !k.toLowerCase().startsWith('salaire') && !k.toLowerCase().startsWith('extras'));
+    cats = [...new Set([...cats, ...budCats])].sort((a,b)=>a.localeCompare(b,'fr'));
+  } else {
+    cats = _getCats(type);
+  }
   sel.innerHTML = cats.map(c=>`<option value="${c}" ${c===currentLabel?'selected':''}>${c}</option>`).join('')
     + `<option value="__custom__" ${currentLabel&&!cats.includes(currentLabel)?'selected':''}>Autre (saisie libre)</option>`;
   const libre = document.getElementById('f-label'); if(libre) libre.value='';
@@ -341,28 +363,40 @@ function openPretModal() {
       <div class="form-group" style="flex:1">
         <label class="form-label">Mensualité (€)</label>
         <input class="form-input" type="number" id="pt-mens" step="0.01" placeholder="850"
-          oninput="updateCreditBudgetPreview(this.value)">
+          oninput="updateCreditBudgetPreview(this.value);previewCreditCalc()">
       </div>
       <div class="form-group" style="flex:1">
         <label class="form-label">Mois de début</label>
-        <input class="form-input" type="month" id="pt-start">
+        <input class="form-input" type="month" id="pt-start" oninput="previewCreditCalc()">
       </div>
     </div>
     <div class="form-row">
       <div class="form-group" style="flex:1">
-        <label class="form-label">Capital restant (€)</label>
-        <input class="form-input" type="number" id="pt-cap" step="100" placeholder="180000">
-      </div></div>
+        <label class="form-label">Capital (€)</label>
+        <input class="form-input" type="number" id="pt-cap" step="100" placeholder="180000"
+          oninput="previewCreditCalc()">
+        <div style="font-size:11px;color:#888;margin-top:3px">Capital au moment du début du crédit</div>
+      </div>
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Taux annuel (%)</label>
+        <input class="form-input" type="number" id="pt-taux" step="0.01" placeholder="1.8"
+          oninput="previewCreditCalc()">
+      </div>
+    </div>
 
     <div class="form-row">
       <div class="form-group" style="flex:1">
-        <label class="form-label">Taux annuel (%)</label>
-        <input class="form-input" type="number" id="pt-taux" step="0.01" placeholder="1.8">
+        <label class="form-label">Durée totale (mois)</label>
+        <input class="form-input" type="number" id="pt-dur" step="1" placeholder="240"
+          oninput="previewCreditCalc()">
+        <div style="font-size:11px;color:#888;margin-top:3px">Durée totale du crédit à la souscription</div>
       </div>
-      <div class="form-group" style="flex:1">
-        <label class="form-label">Durée restante (mois)</label>
-        <input class="form-input" type="number" id="pt-dur" step="1" placeholder="240">
-      </div>
+    </div>
+
+    <!-- Preview calcul automatique -->
+    <div id="pret-preview" style="display:none;background:#E1F5EE;border-radius:8px;padding:10px 12px;font-size:12px;color:#0F6E56;margin-bottom:4px">
+      <div style="font-weight:600;margin-bottom:4px">📊 Calcul automatique au jour d'aujourd'hui :</div>
+      <div id="pret-preview-text"></div>
     </div>
 
     <div id="credit-budget-info" style="display:none;background:#E1F5EE;border-radius:8px;padding:10px 12px;font-size:12px;color:#0F6E56">
@@ -383,6 +417,55 @@ function updatePretNom(type) {
   if (nomEl && !nomEl.value) nomEl.value = `Crédit ${type}`;
 }
 
+/* Prévisualise le calcul automatique capital restant + durée restante */
+function previewCreditCalc() {
+  const capEl   = document.getElementById('pt-cap');
+  const tauxEl  = document.getElementById('pt-taux');
+  const durEl   = document.getElementById('pt-dur');
+  const mensEl  = document.getElementById('pt-mens');
+  const startEl = document.getElementById('pt-start');
+  const prev    = document.getElementById('pret-preview');
+  const prevTxt = document.getElementById('pret-preview-text');
+  if (!prev || !prevTxt) return;
+
+  const cap   = parseFloat(capEl?.value)   || 0;
+  const taux  = parseFloat(tauxEl?.value)  || 0;
+  const dur   = parseInt(durEl?.value)     || 0;
+  const mens  = parseFloat(mensEl?.value)  || 0;
+  const start = startEl?.value; /* "YYYY-MM" */
+
+  if (!cap || !mens || !start) { prev.style.display='none'; return; }
+
+  const result = _computeCapitalActuel(cap, taux, mens, dur, start + '-01');
+  const moisEcoules = _moisEcoules(start + '-01');
+
+  if (moisEcoules <= 0) { prev.style.display='none'; return; }
+
+  prev.style.display = 'block';
+  prevTxt.innerHTML = `
+    ${moisEcoules} mensualité${moisEcoules>1?'s':''} déjà passée${moisEcoules>1?'s':''} (${_nomMoisDebut(start)} → aujourd'hui)<br>
+    Capital restant dû : <strong>${fmt(result.capitalRestant)}</strong><br>
+    Durée restante : <strong>${result.dureeRestante} mois</strong> (≈ ${(result.dureeRestante/12).toFixed(1)} ans)
+  `;
+}
+
+function _moisEcoules(dateDebutStr) {
+  if (!dateDebutStr) return 0;
+  const today = new Date();
+  const debut = new Date(dateDebutStr);
+  return Math.max(0,
+    (today.getFullYear() - debut.getFullYear()) * 12 +
+    (today.getMonth() - debut.getMonth())
+  );
+}
+
+function _nomMoisDebut(yearMonth) {
+  if (!yearMonth) return '';
+  const [y, m] = yearMonth.split('-');
+  const d = new Date(parseInt(y), parseInt(m)-1, 1);
+  return d.toLocaleDateString('fr-FR', { month:'long', year:'numeric' });
+}
+
 function updateCreditBudgetPreview(val) {
   const el = document.getElementById('credit-budget-info');
   if (el) el.style.display = parseFloat(val)>0 ? 'block' : 'none';
@@ -393,20 +476,36 @@ function savePret() {
   const nom   = document.getElementById('pt-nom').value.trim();
   const owner = document.getElementById('pt-owner').value;
   const mens  = parseFloat(document.getElementById('pt-mens').value);
-  const cap   = parseFloat(document.getElementById('pt-cap').value)||0;
-  const taux  = parseFloat(document.getElementById('pt-taux').value)||0;
-  const dur   = parseInt(document.getElementById('pt-dur').value)||0;
-  const startDate = document.getElementById('pt-start')?.value||'';
+  const capitalInitial = parseFloat(document.getElementById('pt-cap').value)||0;
+  const taux           = parseFloat(document.getElementById('pt-taux').value)||0;
+  const dureeTotal     = parseInt(document.getElementById('pt-dur').value)||0;
+  const startMonthStr  = document.getElementById('pt-start')?.value||''; /* "YYYY-MM" */
+  const startDate      = startMonthStr ? startMonthStr + '-01' : '';
 
   if (!nom||isNaN(mens)){alert('Remplissez le nom et la mensualité.');return;}
   if (!type){alert('Sélectionnez le type de crédit.');return;}
+  if (!startDate){alert('Renseignez le mois de début du crédit.');return;}
+
+  /* Calcul automatique : capital restant et durée restante à ce jour */
+  const { capitalRestant, dureeRestante } = _computeCapitalActuel(
+    capitalInitial, taux, mens, dureeTotal, startDate
+  );
 
   /* Mise à jour automatique du budget crédits */
   ensureDefaultCats();
   const creditCat = type === 'Logement' ? 'Habitation' : type;
   DB.budgets.credits[creditCat] = (DB.budgets.credits[creditCat]||0) + mens;
 
-  const newPret = {id:uid(), nom, type, owner, mensualite:mens, capitalRestant:cap, tauxAnnuel:taux, dureeRestante:dur, startDate};
+  const newPret = {
+    id: uid(), nom, type, owner,
+    mensualite:    mens,
+    capitalInitial,      /* Capital à la souscription */
+    capitalRestant,      /* Capital restant calculé à ce jour */
+    tauxAnnuel:    taux,
+    dureeTotal,          /* Durée totale du crédit */
+    dureeRestante,       /* Durée restante calculée à ce jour */
+    startDate            /* "YYYY-MM-01" */
+  };
   DB.prets.push(newPret);
 
   /* Supprimer les anciennes transactions auto du mois courant pour ce prêt
