@@ -83,27 +83,37 @@ function renderPrets() {
   const totalMens = DB.prets.reduce((s,p)=>s+p.mensualite,0);
   const totalCap  = DB.prets.reduce((s,p)=>s+capitalActuel(p),0);
 
-  const name1 = p1(), name2 = p2();
+  const persons   = getActivePersons(); /* Toutes les personnes du compte */
   const txCredits = DB.transactions.filter(t=>t.type==='credits');
+  const budCre    = Object.values(DB.budgets.credits||{}).reduce((a,b)=>a+b,0);
 
   function creditsPourPersonne(owner) {
     const cats={};
     txCredits.forEach(t=>{
       let share=Math.abs(t.amount);
-      if(t.owner==='Commun') share/=2;
+      if(t.owner==='Commun') share /= getPersonCount();
       else if(t.owner!==owner) return;
       cats[t.label]=(cats[t.label]||0)+share;
     });
     return cats;
   }
-  const cred1=creditsPourPersonne(name1), cred2=creditsPourPersonne(name2);
-  const total1=Object.values(cred1).reduce((s,v)=>s+v,0);
-  const total2=Object.values(cred2).reduce((s,v)=>s+v,0);
-  const budCre=Object.values(DB.budgets.credits||{}).reduce((a,b)=>a+b,0);
 
-  const mensP1  = DB.prets.filter(p=>p.owner===name1).reduce((s,p)=>s+p.mensualite,0);
-  const mensP2  = DB.prets.filter(p=>p.owner===name2).reduce((s,p)=>s+p.mensualite,0);
+  /* Calcul dynamique par personne (N personnes) */
+  const perPersonData = persons.map(p => ({
+    name:   p.name,
+    key:    p.key,
+    idx:    getPersonIdx(p.name),
+    creds:  creditsPourPersonne(p.name),
+    mens:   DB.prets.filter(pr=>pr.owner===p.name).reduce((s,pr)=>s+pr.mensualite,0),
+    nb:     DB.prets.filter(pr=>pr.owner===p.name).length,
+  }));
+  perPersonData.forEach(pp => {
+    pp.totalCred = Object.values(pp.creds).reduce((s,v)=>s+v,0);
+  });
   const mensCom = DB.prets.filter(p=>!p.owner||p.owner==='Commun').reduce((s,p)=>s+p.mensualite,0);
+  /* Rétrocompatibilité — garder name1/name2 pour les parties du code non refactorisées */
+  const name1 = persons[0]?.name || '';
+  const name2 = persons[1]?.name || '';
 
   return `
   <!-- KPI globaux -->
@@ -125,48 +135,47 @@ function renderPrets() {
     </div>
   </div>
 
-  <!-- Par titulaire — masqué si 1 seule personne -->
+  <!-- Par titulaire — masqué si 1 seule personne, dynamique pour N personnes -->
   ${getActivePersons().length>1?`
-  <div class="kpi-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:20px">
-    <div class="kpi-card" style="border-top:3px solid #185FA5">
-      <div class="kpi-label"><span class="pret-owner-badge pret-owner-p1" style="font-size:10px">◈ ${name1}</span></div>
-      <div class="kpi-value" style="color:#185FA5;font-size:15px">${mensP1>0?fmt(mensP1)+'/mois':'—'}</div>
-      <div class="kpi-sub">${DB.prets.filter(p=>p.owner===name1).length} crédit(s)</div>
-    </div>
-    <div class="kpi-card" style="border-top:3px solid #72243E">
-      <div class="kpi-label"><span class="pret-owner-badge pret-owner-p2" style="font-size:10px">◈ ${name2}</span></div>
-      <div class="kpi-value" style="color:#72243E;font-size:15px">${mensP2>0?fmt(mensP2)+'/mois':'—'}</div>
-      <div class="kpi-sub">${DB.prets.filter(p=>p.owner===name2).length} crédit(s)</div>
-    </div>
+  <div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr));margin-bottom:20px">
+    ${perPersonData.map(pp=>{
+      const av = AVATAR_COLORS[pp.idx] || AVATAR_COLORS[0];
+      return `<div class="kpi-card" style="border-top:3px solid ${av.text}">
+        <div class="kpi-label">
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px">
+            <span style="width:16px;height:16px;border-radius:50%;background:${av.bg};color:${av.text};display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">${pp.name.charAt(0).toUpperCase()}</span>
+            ${pp.name}
+          </span>
+        </div>
+        <div class="kpi-value" style="color:${av.text};font-size:15px">${pp.mens>0?fmt(pp.mens)+'/mois':'—'}</div>
+        <div class="kpi-sub">${pp.nb} crédit(s)</div>
+      </div>`;
+    }).join('')}
     <div class="kpi-card" style="border-top:3px solid #999">
-      <div class="kpi-label"><span class="pret-owner-badge pret-owner-com" style="font-size:10px">👥 Commun</span></div>
+      <div class="kpi-label"><span class="pret-owner-badge pret-owner-com" style="font-size:10px">👥 ${communLabel()}</span></div>
       <div class="kpi-value" style="color:#555;font-size:15px">${mensCom>0?fmt(mensCom)+'/mois':'—'}</div>
       <div class="kpi-sub">${DB.prets.filter(p=>!p.owner||p.owner==='Commun').length} crédit(s)</div>
     </div>
   </div>`:''}
 
-  <!-- Crédits par personne — masqué si 1 seule personne -->
+  <!-- Crédits par personne — masqué si 1 seule personne, dynamique pour N personnes -->
   ${getActivePersons().length>1?`
   <div class="section-wrap" style="margin-bottom:20px">
     <div class="section-header">
       <span class="section-title">Crédits par personne</span>
-      <span style="font-size:12px;color:#999">Depuis les transactions · Commun ÷ 2</span>
+      <span style="font-size:12px;color:#999">Depuis les transactions · ${communLabel()}</span>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
-      <div style="padding:16px;border-right:1px solid var(--color-border-tertiary)">
+    <div style="display:grid;grid-template-columns:repeat(${Math.min(perPersonData.length,2)},minmax(0,1fr));gap:0">
+      ${perPersonData.map((pp,i)=>`
+      <div style="padding:16px;${i<perPersonData.length-1?'border-right:1px solid var(--color-border-tertiary)':''}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <b>${name1}</b><span class="kpi-value red" style="font-size:15px">${fmt(total1)}</span>
+          <b>${pp.name}</b><span class="kpi-value red" style="font-size:15px">${fmt(pp.totalCred)}</span>
         </div>
-        ${Object.keys(DB.budgets.credits||{}).length ? renderPersonCreditBars(name1,cred1,budCre) : ''}
-        ${Object.keys(cred1).length===0 ? '<div style="color:#bbb;font-size:12px;text-align:center;padding:12px">Aucun crédit</div>' : renderPersonCreditRows(cred1)}
-      </div>
-      <div style="padding:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <b>${name2}</b><span class="kpi-value red" style="font-size:15px">${fmt(total2)}</span>
-        </div>
-        ${Object.keys(DB.budgets.credits||{}).length ? renderPersonCreditBars(name2,cred2,budCre) : ''}
-        ${Object.keys(cred2).length===0 ? '<div style="color:#bbb;font-size:12px;text-align:center;padding:12px">Aucun crédit</div>' : renderPersonCreditRows(cred2)}
-      </div>
+        ${Object.keys(DB.budgets.credits||{}).length ? renderPersonCreditBars(pp.name,pp.creds,budCre) : ''}
+        ${Object.keys(pp.creds).length===0
+          ? '<div style="color:#bbb;font-size:12px;text-align:center;padding:12px">Aucun crédit</div>'
+          : renderPersonCreditRows(pp.creds)}
+      </div>`).join('')}
     </div>
   </div>`:''}
 

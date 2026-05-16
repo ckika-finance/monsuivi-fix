@@ -294,21 +294,21 @@ function getBudgetForPerson(year, owner) {
     );
 
     salaryKeys.forEach(k => {
-      /* Garder le budget salaire uniquement si la clé contient le nom de la personne
-         ou s'il n'y a aucun indicateur de personne (budget commun générique) */
-      const kLow       = k.toLowerCase();
-      const ownerLow   = owner.toLowerCase();
-      const otherOwner = getActivePersons().find(p => p.name !== owner)?.name || '';
-      const otherLow   = otherOwner.toLowerCase();
+      const kLow     = k.toLowerCase();
+      const ownerLow = owner.toLowerCase();
 
+      /* Vérifier si la clé contient le nom d'une AUTRE personne (parmi toutes les personnes) */
       const belongsToOwner = kLow.includes(ownerLow);
-      const belongsToOther = kLow.includes(otherLow) && !belongsToOwner;
+      const belongsToOtherPerson = !belongsToOwner && getActivePersons().some(p => {
+        if (p.name === owner) return false;
+        return kLow.includes(p.name.toLowerCase());
+      });
 
-      if (belongsToOther) {
-        /* Ce salaire appartient à l'autre personne → 0 pour owner */
+      if (belongsToOtherPerson) {
+        /* Ce salaire appartient à une autre personne → 0 pour owner */
         clone.revenus[k] = 0;
       }
-      /* Sinon garder 100 % (salaire propre ou générique) */
+      /* Sinon (nom de owner dans la clé, ou clé générique sans nom) → garder 100% */
     });
 
     /* Revenus autres (non-salaire) → divisés par le nombre de personnes */
