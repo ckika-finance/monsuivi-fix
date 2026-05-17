@@ -47,19 +47,49 @@ function fmtEcheance(pret, moisOffset) {
   return `${MONTHS_FR_LONG[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+/**
+ * Construit le tableau d'amortissement depuis capitalDepart,
+ * avec les vraies dates calendaires (1ère ligne = mois courant+1).
+ * @returns rows avec {mois, dateLabel, mensualite, partCapital, partInterets, capitalRestant, totalInterets}
+ */
 function buildAmortissement(pret, capitalDepart, duree) {
-  const rows = [];
-  let cap    = capitalDepart!==undefined ? capitalDepart : pret.capitalRestant;
-  const dur  = duree!==undefined ? duree : pret.dureeRestante;
-  const taux = pret.tauxAnnuel/100/12;
-  const mens = pret.mensualite;
-  let totInt = 0;
-  for (let m=1; m<=dur && cap>0.01; m++) {
-    const pi  = Math.round(cap*taux*100)/100;
-    const pc  = Math.min(cap, Math.round((mens-pi)*100)/100);
-    cap       = Math.max(0, Math.round((cap-pc)*100)/100);
-    totInt    = Math.round((totInt+pi)*100)/100;
-    rows.push({mois:m, mensualite:mens, partCapital:pc, partInterets:pi, capitalRestant:cap, totalInterets:totInt});
+  const rows    = [];
+  const capBase = capitalDepart !== undefined ? capitalDepart : capitalActuel(pret);
+  const durBase = duree !== undefined ? duree : dureeRestanteActuelle(pret);
+  const taux    = (pret.tauxAnnuel || 0) / 100 / 12;
+  const mens    = pret.mensualite;
+  let cap       = capBase;
+  let totInt    = 0;
+  const n       = getPersonCount();
+
+  /* Date de départ du tableau = mois suivant le mois courant */
+  const today = new Date();
+  let eY = today.getFullYear(), eM = today.getMonth(); /* 0-based */
+
+  for (let m = 1; m <= durBase && cap > 0.01; m++) {
+    eM++; if (eM > 11) { eM = 0; eY++; }
+
+    const pi  = Math.round(cap * taux * 100) / 100;
+    const pc  = Math.min(cap, Math.round((mens - pi) * 100) / 100);
+    cap       = Math.max(0, Math.round((cap - pc) * 100) / 100);
+    totInt    = Math.round((totInt + pi) * 100) / 100;
+
+    const dateLabel = new Date(eY, eM, 1)
+      .toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+
+    /* Part par personne si crédit commun */
+    const isCommun = !pret.owner || pret.owner === 'Commun';
+    const partPerso = isCommun ? mens / n : mens;
+    const pcPerso   = isCommun ? pc / n : pc;
+    const piPerso   = isCommun ? pi / n : pi;
+
+    rows.push({
+      mois: m, dateLabel,
+      mensualite: mens, mensualitePerso: partPerso,
+      partCapital: pc, partCapitalPerso: pcPerso,
+      partInterets: pi, partInteretsPerso: piPerso,
+      capitalRestant: cap, totalInterets: totInt
+    });
   }
   return rows;
 }
@@ -264,35 +294,48 @@ function renderPrets() {
     </div>
   </div>
 
-  <!-- Tableau amortissement avec vraies dates -->
+  <!-- Tableau amortissement — 12 prochaines échéances -->
+  ${(()=>{
+    const isCommun = !pret.owner || pret.owner === 'Commun';
+    const nPers    = getPersonCount();
+    const showPerso = isCommun && nPers > 1;
+    const next12   = amort.slice(0, 12);
+    return `
   <div class="section-wrap">
     <div class="section-header">
       <span class="section-title">Tableau d'amortissement — ${pret.nom}</span>
-      <span style="font-size:12px;color:#999">24 prochaines échéances</span>
+      <span style="font-size:12px;color:#999">12 prochaines échéances${showPerso?' · Part/personne calculée':''}${pret.startDate?' · Démarré '+fmtStartDate(pret):''}</span>
     </div>
     <div style="overflow-x:auto">
       <table class="budget-table" style="font-size:12px">
         <thead>
           <tr>
             <th style="text-align:left">Échéance</th>
-            <th>Mensualité</th><th>Part capital</th>
-            <th>Part intérêts</th><th>Capital restant</th>
+            <th>Mensualité</th>
+            ${showPerso?'<th>Part/pers.</th>':''}
+            <th>Capital</th>
+            <th>Intérêts</th>
+            <th>Capital restant</th>
           </tr>
         </thead>
         <tbody>
-          ${amort.slice(0,24).map((r,i)=>`
+          ${next12.map(r=>`
           <tr>
-            <td style="color:#666;font-weight:500">${fmtEcheance(pret,i+1)}</td>
+            <td style="color:#555;font-weight:500;text-transform:capitalize">${r.dateLabel}</td>
             <td>${fmt(r.mensualite)}</td>
+            ${showPerso?`<td style="color:#534AB7">${fmt(r.mensualitePerso)}</td>`:''}
             <td style="color:#1D9E75">${fmt(r.partCapital)}</td>
             <td style="color:#D85A30">${fmt(r.partInterets)}</td>
             <td style="font-weight:600">${fmt(r.capitalRestant)}</td>
           </tr>`).join('')}
-          ${amort.length>24?`<tr><td colspan="5" style="text-align:center;color:#bbb;padding:12px;font-size:11px">… ${amort.length-24} échéances supplémentaires</td></tr>`:''}
+          ${amort.length > 12 ? `<tr><td colspan="${showPerso?6:5}" style="text-align:center;color:#bbb;padding:10px;font-size:11px">
+            ${amort.length - 12} échéances masquées · Total intérêts restants : ${fmt(amort[amort.length-1].totalInterets)}
+          </td></tr>` : ''}
         </tbody>
       </table>
     </div>
   </div>`;
+  })()}`
 }
 
 function renderPersonCreditBars(owner, credCats, budgetTotal) {

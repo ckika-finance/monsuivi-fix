@@ -350,14 +350,24 @@ function renderAnalyse() {
     </div>
   </div>
 
-  <!-- Mini tableaux détaillés -->
+  <!-- Mini tableaux détaillés — masquer les sections sans données -->
   <div class="tables-grid">
-    ${renderMiniTable('Revenus',    'rev', bud.revenus    ||{}, realByCat(txs,'revenus'),    factor)}
-    ${renderMiniTable('Dépenses',   'dep', bud.depenses   ||{}, realByCat(txs,'depenses'),   factor)}
-    ${renderMiniTable('Abonnements','abo', bud.abonnements||{}, realByCat(txs,'abonnements'),factor)}
-    ${renderMiniTable('Crédits',    'cre', bud.credits    ||{}, realByCat(txs,'credits'),    factor)}
-    ${renderMiniTable('Épargne',    'epa', bud.epargne    ||{}, realByCat(txs,'epargne'),    factor)}
-    ${renderMiniTable('Projets',    'pro', bud.projets    ||{}, realByCat(txs,'projets'),    factor)}
+    ${[
+      ['Revenus',    'rev', 'revenus'],
+      ['Dépenses',   'dep', 'depenses'],
+      ['Abonnements','abo', 'abonnements'],
+      ['Crédits',    'cre', 'credits'],
+      ['Épargne',    'epa', 'epargne'],
+      ['Projets',    'pro', 'projets']
+    ].map(([title, cls, type])=>{
+      const budCats = bud[type] || {};
+      const reals   = realByCat(txs, type);
+      /* Masquer si aucune catégorie avec budget OU données réelles */
+      const hasBud  = Object.values(budCats).some(v => v > 0);
+      const hasReal = Object.values(reals).some(v => v > 0);
+      if (!hasBud && !hasReal) return '';
+      return renderMiniTable(title, cls, budCats, reals, factor);
+    }).filter(Boolean).join('')}
   </div>`;
 }
 
@@ -365,20 +375,23 @@ function renderMiniTable(title, cls, budgets, reals, factor=1) {
   const cats = Object.keys(budgets);
   const tR   = cats.reduce((s,c)=>s+(reals[c]||0),0);
   const tB   = cats.reduce((s,c)=>s+budgets[c],0)*factor;
+  /* Filtrer les lignes entièrement vides (budget=0 ET réel=0) */
+  const activeCats = cats.filter(cat => (reals[cat]||0)>0 || (budgets[cat]||0)>0);
+  if (!activeCats.length) return '';
   return `<div class="table-card">
     <div class="table-header ${cls}">${title}</div>
     <table class="data-table">
       <tr><th>Catégorie</th><th>Réel</th><th>Budget</th></tr>
-      ${cats.map(cat=>{
-        const r=reals[cat]||0, b=budgets[cat]*factor, over=r>b&&b>0;
+      ${activeCats.map(cat=>{
+        const r=reals[cat]||0, b=(budgets[cat]||0)*factor, over=r>b&&b>0;
         return `<tr class="${over?'row-alert':''}">
           <td>${cat}</td>
           <td style="${over?'color:#D85A30;font-weight:500':''}">${r>0?fmt(r):'<span style="color:#ccc">—</span>'}${over?' ▲':''}</td>
-          <td style="color:#999">${fmt(b)}</td>
+          <td style="color:#999">${b>0?fmt(b):'<span style="color:#ccc">—</span>'}</td>
         </tr>`;
       }).join('')}
       <tr style="font-weight:500;background:#f5f4f0">
-        <td>Total</td><td>${fmt(tR)}</td><td style="color:#999">${fmt(tB)}</td>
+        <td>Total</td><td>${fmt(tR)}</td><td style="color:#999">${tB>0?fmt(tB):'—'}</td>
       </tr>
     </table>
   </div>`;

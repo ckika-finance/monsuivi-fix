@@ -16,8 +16,10 @@ const KEYS = {
   persons:    'monsuivi_persons',
   prets:      'monsuivi_prets',
   onboarding: 'monsuivi_onboarding',
-  transfer:   'monsuivi_transfer'
+  transfer:   'monsuivi_transfer',
+  version:    'monsuivi_db_version'
 };
+const DB_VERSION = 2;
 
 /* Structure persons dynamique : count + jusqu'à 4 personnes */
 const DEFAULT_PERSONS_DYNAMIC = {
@@ -244,23 +246,28 @@ function _initEmptyDB() {
 
 /* Migration budget : ancienne clé 'factures' → 'abonnements' */
 function _migrateBudget(bud) {
-  if (!bud) return JSON.parse(JSON.stringify(DEFAULT_BUDGETS));
-  /* Si 'factures' existe et 'abonnements' non → migrer */
-  if (bud.factures && !bud.abonnements) {
+  /* Nouveau compte vierge */
+  if (!bud) return { revenus:{}, depenses:{}, abonnements:{}, credits:{}, epargne:{}, projets:{} };
+
+  /* Migration format factures→abonnements (ancien format) */
+  if (bud.factures && Object.keys(bud.factures).length > 0 && !bud.abonnements) {
     bud.abonnements = bud.factures;
     delete bud.factures;
+  } else if (bud.factures && bud.abonnements) {
+    /* Fusionner factures dans abonnements si les deux existent */
+    Object.entries(bud.factures).forEach(([k,v]) => {
+      if (!(k in bud.abonnements)) bud.abonnements[k] = v;
+    });
+    delete bud.factures;
   }
-  /* S'assurer que toutes les clés requises existent */
-  if (!bud.abonnements) bud.abonnements = {};
-  if (!bud.revenus)     bud.revenus     = {};
-  if (!bud.depenses)    bud.depenses    = {};
-  if (!bud.credits)     bud.credits     = {};
-  if (!bud.epargne)     bud.epargne     = {};
-  if (!bud.projets)     bud.projets     = {};
-  /* Ajouter Santé si absent */
-  if (!('Santé' in bud.depenses)) bud.depenses['Santé'] = 40;
-  /* Ajouter catégories crédits si absentes */
-  ['Auto','Conso','Habitation'].forEach(c => { if(!(c in bud.credits)) bud.credits[c] = 0; });
+
+  /* S'assurer que toutes les clés de type existent (sans écraser les données) */
+  ['revenus','depenses','abonnements','credits','epargne','projets'].forEach(type => {
+    if (!bud[type] || typeof bud[type] !== 'object') bud[type] = {};
+  });
+
+  /* NE PAS ajouter de catégories prédéfinies pour préserver les comptes vierges
+     Les catégories sont créées dynamiquement lors des saisies utilisateur */
   return bud;
 }
 function _migrateBudgetPrev(raw) {
@@ -302,8 +309,9 @@ async function saveDB() {
     [KEYS.pro,        JSON.stringify(DB.pro_totals)   ],
     [KEYS.persons,    JSON.stringify(DB.persons)      ],
     [KEYS.prets,      JSON.stringify(DB.prets)        ],
-    [KEYS.onboarding, JSON.stringify(DB.onboarding)       ],
-    [KEYS.transfer,   JSON.stringify(DB.monthlyTransferDone||{})]
+    [KEYS.onboarding, JSON.stringify(DB.onboarding)             ],
+    [KEYS.transfer,   JSON.stringify(DB.monthlyTransferDone||{}) ],
+    [KEYS.version,    JSON.stringify(DB_VERSION)                 ]
   ];
 
   const results = await Promise.all(pairs.map(([k,v]) => sbSet(k, v)));
@@ -350,6 +358,8 @@ function _saveLocal() {
     localStorage.setItem(_localKey(KEYS.pro),        JSON.stringify(DB.pro_totals));
     localStorage.setItem(_localKey(KEYS.persons),    JSON.stringify(DB.persons));
     localStorage.setItem(_localKey(KEYS.prets),      JSON.stringify(DB.prets));
+    localStorage.setItem(_localKey(KEYS.transfer),   JSON.stringify(DB.monthlyTransferDone||{}));
+    localStorage.setItem(_localKey(KEYS.version),    JSON.stringify(DB_VERSION));
     localStorage.setItem(_localKey(KEYS.onboarding), JSON.stringify(DB.onboarding));
   } catch(e) {}
 }
@@ -371,6 +381,10 @@ function _loadLocal() {
     DB.prets        = _parse(localStorage.getItem(_localKey(KEYS.prets)),      [...DEFAULT_PRETS]);
     const rawP      = _parse(localStorage.getItem(_localKey(KEYS.persons)),    null);
     DB.persons      = _migratePersons(rawP);
+
+    /* Préserver monthlyTransferDone */
+    const rawTr = localStorage.getItem(_localKey(KEYS.transfer));
+    if (rawTr !== null) DB.monthlyTransferDone = _parse(rawTr, {});
 
     /* onboarding : absent = compte existant */
     const rawOnb    = localStorage.getItem(_localKey(KEYS.onboarding));

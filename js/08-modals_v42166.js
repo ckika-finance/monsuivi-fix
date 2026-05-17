@@ -130,19 +130,17 @@ function updateCatOptions(type, currentLabel) {
   const sel = document.getElementById('f-label-sel'); if(!sel) return;
   let cats;
   if (type === 'revenus') {
-    /* Pour les revenus : "Salaire [Nom du propriétaire sélectionné]" + autres revenus */
+    /* Pour les revenus : uniquement "Salaire" lié au propriétaire + "Autre" */
     const ownerSel = document.getElementById('f-owner');
     const owner    = ownerSel ? ownerSel.value : (getAllOwners()[0] || '');
     if (owner && owner !== 'Commun') {
-      cats = [`Salaire ${owner}`];
+      /* Propriétaire identifié → une seule option salaire spécifique */
+      cats = [`Salaire`];
     } else {
-      /* Commun ou pas de propriétaire : liste générique */
-      cats = getAllOwners().map(n => `Salaire ${n}`);
+      /* Commun : pas de catégorie salaire (les salaires sont individuels) */
+      cats = [];
     }
-    /* Ajouter les catégories budget existantes (hors salaires) */
-    const budCats = Object.keys(DB.budgets['revenus']||{})
-      .filter(k => !k.toLowerCase().startsWith('salaire') && !k.toLowerCase().startsWith('extras'));
-    cats = [...new Set([...cats, ...budCats])].sort((a,b)=>a.localeCompare(b,'fr'));
+    /* "Autre" est toujours ajouté via __custom__ en fin de liste */
   } else {
     cats = _getCats(type);
   }
@@ -159,7 +157,16 @@ function saveTx(txId) {
   const sel     = document.getElementById('f-label-sel').value;
   const libre   = document.getElementById('f-label').value.trim();
   const comment = document.getElementById('f-comment').value.trim();
-  const label   = (sel==='__custom__'?libre:sel).trim()||libre;
+  let label = (sel==='__custom__' ? libre : sel).trim() || libre;
+  /* Pour les revenus : transformer "Salaire" → "Salaire [Prénom]" si propriétaire connu */
+  if (type === 'revenus' && label === 'Salaire' && owner && owner !== 'Commun') {
+    label = 'Salaire ' + owner;
+  }
+  /* Créer la catégorie dans le budget revenus si elle n'existe pas encore */
+  if (type === 'revenus' && label) {
+    if (!DB.budgets.revenus) DB.budgets.revenus = {};
+    if (!(label in DB.budgets.revenus)) DB.budgets.revenus[label] = 0;
+  }
 
   if (!date||isNaN(amount)||!label){alert('Remplissez date, montant et catégorie.');return;}
 
