@@ -50,17 +50,18 @@ function renderPerso(owner) {
     </div>
   </div>
 
-  <!-- KPI 3 colonnes — comme le mockup -->
+  <!-- KPI — masquer les types sans données ni budget -->
   <div class="perso-kpis" style="margin-bottom:16px">
-    ${kpiData.slice(0,6).map(k=>`
+    ${kpiData.filter(k => k.total > 0 || k.budget > 0).map(k=>`
     <div class="perso-kpi ${k.over?'kpi-alert':''}">
       <div class="perso-kpi-label">${TYPE_LABELS[k.type]}s${k.over?' ▲':''}</div>
       <div class="perso-kpi-val" style="color:${TYPE_COLORS[k.type]}">${k.total>0?fmt(k.total):'—'}</div>
-      <div class="perso-kpi-sub">Budget ${fmtS(k.budget)}</div>
+      <div class="perso-kpi-sub">${k.budget>0?'Budget '+fmtS(k.budget):'Pas de budget'}</div>
     </div>`).join('')}
   </div>
 
-  <!-- 2 colonnes barres dépenses + abonnements -->
+  <!-- 2 colonnes barres dépenses + abonnements — masquées si vides -->
+  ${(kpiData.find(k=>k.type==='depenses')?.total||0)>0||(kpiData.find(k=>k.type==='abonnements')?.total||0)>0||Object.values(bud.depenses||{}).some(v=>v>0)||Object.values(bud.abonnements||{}).some(v=>v>0)?`
   <div class="two-col" style="margin-bottom:16px">
 
     <div class="card">
@@ -70,22 +71,25 @@ function renderPerso(owner) {
       </div>
       <div class="card-body">
         ${(()=>{
-          const cats = Object.keys(bud.depenses||{});
-          const rows = cats.map(cat=>{
-            const r=depReals[cat]||0, b=bud.depenses[cat]||0;
-            if (r===0 && b===0) return ''; /* masquer si aucune donnée pour cette personne */
-            const over=r>b&&b>0, maxV=Math.max(r,b,1);
+          /* Fusionner catégories budget + réels (inclut les catégories nouvelles) */
+          const budDep  = bud.depenses || {};
+          const allDep  = [...new Set([...Object.keys(budDep), ...Object.keys(depReals)])];
+          const active  = allDep.filter(cat => (depReals[cat]||0)>0 || (budDep[cat]||0)>0);
+          if (!active.length) return '<div style="color:#bbb;font-size:12px;text-align:center;padding:8px">Aucune dépense</div>';
+          const maxV = Math.max(...active.map(cat=>Math.max(depReals[cat]||0, budDep[cat]||0)), 1);
+          return active.map(cat=>{
+            const r=depReals[cat]||0, b=budDep[cat]||0, over=r>b&&b>0;
             return `<div class="prog-row">
               <div class="prog-head">
                 <span class="prog-name ${over?'over':''}">${cat}${over?' ▲':''}</span>
-                <span class="prog-val">${fmtS(r)} / ${fmtS(b)}</span>
+                <span class="prog-val">${r>0?fmtS(r):'—'} ${b>0?'/ '+fmtS(b):''}</span>
               </div>
               <div class="prog-track">
                 <div class="prog-real" style="width:${Math.min(100,Math.round(r/maxV*100))}%;background:${over?'#D85A30':'#D85A30'}"></div>
+                ${b>0?`<div class="bar-mark" style="left:${Math.min(100,Math.round(b/maxV*100))}%"></div>`:''}
               </div>
             </div>`;
-          }).filter(Boolean);
-          return rows.length ? rows.join('') : '<div style="color:#bbb;font-size:12px;text-align:center;padding:8px">Aucune dépense</div>';
+          }).join('');
         })()}
       </div>
     </div>
@@ -97,27 +101,29 @@ function renderPerso(owner) {
       </div>
       <div class="card-body">
         ${(()=>{
-          const cats = Object.keys(bud.abonnements||{});
-          const rows = cats.map(cat=>{
-            const r=facReals[cat]||0, b=bud.abonnements[cat]||0;
-            if (r===0 && b===0) return ''; /* masquer si aucune donnée */
-            const maxV=Math.max(r,b,1);
+          const budAbo  = bud.abonnements || {};
+          const allAbo  = [...new Set([...Object.keys(budAbo), ...Object.keys(facReals)])];
+          const active  = allAbo.filter(cat => (facReals[cat]||0)>0 || (budAbo[cat]||0)>0);
+          if (!active.length) return '<div style="color:#bbb;font-size:12px;text-align:center;padding:8px">Aucun abonnement</div>';
+          const maxV = Math.max(...active.map(cat=>Math.max(facReals[cat]||0, budAbo[cat]||0)), 1);
+          return active.map(cat=>{
+            const r=facReals[cat]||0, b=budAbo[cat]||0;
             return `<div class="prog-row">
               <div class="prog-head">
                 <span class="prog-name">${cat}</span>
-                <span class="prog-val">${fmtS(r)} / ${fmtS(b)}</span>
+                <span class="prog-val">${r>0?fmtS(r):'—'} ${b>0?'/ '+fmtS(b):''}</span>
               </div>
               <div class="prog-track">
                 <div class="prog-real" style="width:${Math.min(100,Math.round(r/maxV*100))}%;background:#378ADD"></div>
+                ${b>0?`<div class="bar-mark" style="left:${Math.min(100,Math.round(b/maxV*100))}%"></div>`:''}
               </div>
             </div>`;
-          }).filter(Boolean);
-          return rows.length ? rows.join('') : '<div style="color:#bbb;font-size:12px;text-align:center;padding:8px">Aucun abonnement</div>';
+          }).join('');
         })()}
       </div>
     </div>
 
-  </div>
+  </div>`:''}
 
   <!-- Mini tableaux — uniquement catégories avec données pour cette personne -->
   <div class="tables-grid">
@@ -125,13 +131,12 @@ function renderPerso(owner) {
       const reals = persoRealByCat(txs,type,owner);
       const budCats = bud[type]||{};
       /* Garder seulement les catégories ayant au moins données réelles ou budget */
-      const activeCats = Object.keys(budCats).filter(cat=>(reals[cat]||0)>0||(budCats[cat]||0)>0);
-      if(activeCats.length===0 && Object.values(reals).every(v=>v===0)) return '';
+      /* Fusionner budget + réels pour avoir toutes les catégories pertinentes */
+      const allCats  = [...new Set([...Object.keys(budCats), ...Object.keys(reals)])];
+      const activeCats = allCats.filter(cat => (reals[cat]||0) > 0 || (budCats[cat]||0) > 0);
+      if (activeCats.length === 0) return '';
       const filteredBud = {};
-      activeCats.forEach(cat=>{ filteredBud[cat]=budCats[cat]||0; });
-      /* Ajouter les catégories avec réels mais sans budget */
-      Object.keys(reals).forEach(cat=>{ if(!filteredBud[cat]&&reals[cat]>0) filteredBud[cat]=0; });
-      if(Object.keys(filteredBud).length===0) return '';
+      activeCats.forEach(cat => { filteredBud[cat] = budCats[cat] || 0; });
       return renderMiniTable(type==='abonnements'?'Abonnements':TYPE_LABELS[type]+'s', TYPE_HEADER_CLS[type], filteredBud, reals);
     }).filter(Boolean).join('')}
   </div>`;
@@ -333,7 +338,7 @@ function renamePerson(key, newName) {
   if(!newName.trim()||newName.trim()===old) return;
   const n=newName.trim();
   DB.transactions.forEach(t=>{if(t.owner===old) t.owner=n;});
-  [['Salaire Net '],['Extras ']].forEach(([prefix])=>{
+  [['Salaire '],['Extras ']].forEach(([prefix])=>{
     const oldCat=prefix+old, newCat=prefix+n;
     const bud=DB.budgets?.revenus;
     if(bud&&oldCat in bud){bud[newCat]=bud[oldCat];delete bud[oldCat];}

@@ -214,6 +214,7 @@ async function loadDB() {
     /* Injection automatique des abonnements du mois courant */
     injectAbonnementsTransactions();
     injectPretsTransactions();
+    _migrateOldLabels(); /* Migration labels Salaire Net → Salaire */
     /* Vérifier transfert mensuel solde → épargne */
     checkMonthlyTransfer();
     render();
@@ -270,6 +271,44 @@ function _migrateBudget(bud) {
      Les catégories sont créées dynamiquement lors des saisies utilisateur */
   return bud;
 }
+/* Migration one-shot : normaliser "Salaire Net X"→"Salaire X" et "Assurance"→"Assurance Habitation" */
+function _migrateOldLabels() {
+  let changed = false;
+
+  /* Transactions : Salaire Net X → Salaire X */
+  DB.transactions.forEach(t => {
+    if (t.type === 'revenus' && t.label) {
+      const newLabel = t.label.replace(/^Salaire [Nn]et /, 'Salaire ');
+      if (newLabel !== t.label) { t.label = newLabel; changed = true; }
+    }
+    /* Assurance générique → Assurance Habitation */
+    if (t.label === 'Assurance') { t.label = 'Assurance Habitation'; changed = true; }
+  });
+
+  /* Budget revenus : renommer les clés */
+  function migrateRevCats(rev) {
+    if (!rev) return;
+    Object.keys(rev).forEach(k => {
+      const nk = k.replace(/^Salaire [Nn]et /, 'Salaire ');
+      if (nk !== k && !(nk in rev)) { rev[nk] = rev[k]; delete rev[k]; changed = true; }
+    });
+  }
+  migrateRevCats(DB.budgets?.revenus);
+  Object.values(DB.budget_prev || {}).forEach(yb => migrateRevCats(yb?.revenus));
+
+  /* Budget abonnements/dépenses : Assurance → Assurance Habitation */
+  ['abonnements','depenses','credits'].forEach(type => {
+    const bud = DB.budgets?.[type];
+    if (bud && 'Assurance' in bud) {
+      if (!bud['Assurance Habitation']) bud['Assurance Habitation'] = bud['Assurance'];
+      delete bud['Assurance'];
+      changed = true;
+    }
+  });
+
+  if (changed && typeof saveDB === 'function') saveDB();
+}
+
 function _migrateBudgetPrev(raw) {
   if (!raw || typeof raw !== 'object') return {};
   const result = {};

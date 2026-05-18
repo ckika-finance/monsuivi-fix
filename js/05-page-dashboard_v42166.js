@@ -286,12 +286,18 @@ function renderAnalyse() {
   const hist   = getLast6Months();
 
   /* Graphique évolution dépenses par catégorie (barres horizontales) */
+  /* renderTrend : barres par catégorie — masque les lignes sans données */
   function renderTrend(type, color) {
-    const cats   = Object.keys(bud[type]||{});
-    const reals  = realByCat(txs, type);
-    const maxVal = Math.max(...cats.map(c=>(reals[c]||0)), ...cats.map(c=>(bud[type][c]||0)*factor), 1);
-    return cats.map(cat=>{
-      const r=reals[cat]||0, b=(bud[type][cat]||0)*factor, over=r>b&&b>0;
+    const budCats = bud[type] || {};
+    const reals   = realByCat(txs, type);
+    /* Fusionner les catégories du budget + celles ayant des réels (nouvelles catégories) */
+    const allCats = [...new Set([...Object.keys(budCats), ...Object.keys(reals)])];
+    /* Filtrer : garder seulement celles avec budget ou réel > 0 */
+    const cats = allCats.filter(cat => (reals[cat]||0) > 0 || (budCats[cat]||0) > 0);
+    if (!cats.length) return '';
+    const maxVal = Math.max(...cats.map(c => Math.max(reals[c]||0, (budCats[c]||0)*factor)), 1);
+    return cats.map(cat => {
+      const r = reals[cat]||0, b = (budCats[cat]||0)*factor, over = r>b && b>0;
       return `<div class="bar-row">
         <div class="bar-row-label" title="${cat}">${cat}</div>
         <div class="bar-track">
@@ -350,34 +356,65 @@ function renderAnalyse() {
     </div>
   </div>
 
-  <!-- Mini tableaux détaillés — masquer les sections sans données -->
-  <div class="tables-grid">
-    ${[
-      ['Revenus',    'rev', 'revenus'],
-      ['Dépenses',   'dep', 'depenses'],
-      ['Abonnements','abo', 'abonnements'],
-      ['Crédits',    'cre', 'credits'],
-      ['Épargne',    'epa', 'epargne'],
-      ['Projets',    'pro', 'projets']
-    ].map(([title, cls, type])=>{
-      const budCats = bud[type] || {};
-      const reals   = realByCat(txs, type);
-      /* Masquer si aucune catégorie avec budget OU données réelles */
-      const hasBud  = Object.values(budCats).some(v => v > 0);
-      const hasReal = Object.values(reals).some(v => v > 0);
-      if (!hasBud && !hasReal) return '';
-      return renderMiniTable(title, cls, budCats, reals, factor);
-    }).filter(Boolean).join('')}
+  <!-- Sections détaillées par type — masquées automatiquement si vides -->
+  ${(()=>{
+    const sections = [
+      ['Revenus',     'rev', 'revenus',     '#1D9E75'],
+      ['Dépenses',    'dep', 'depenses',    '#D85A30'],
+      ['Abonnements', 'abo', 'abonnements', '#378ADD'],
+      ['Crédits',     'cre', 'credits',     '#BA7517'],
+      ['Épargne',     'epa', 'epargne',     '#534AB7'],
+      ['Projets',     'pro', 'projets',     '#D4537E']
+    ];
+    return sections.map(([title, cls, type, color])=>{
+      const budCats    = bud[type] || {};
+      const reals      = realByCat(txs, type);
+      const allCats    = [...new Set([...Object.keys(budCats), ...Object.keys(reals)])];
+      const activeCats = allCats.filter(cat => (reals[cat]||0)>0 || (budCats[cat]||0)>0);
+      if (!activeCats.length) return '';
+      const tReal  = activeCats.reduce((s,cat)=>s+(reals[cat]||0), 0);
+      const tBud   = activeCats.reduce((s,cat)=>s+(budCats[cat]||0), 0)*factor;
+      const maxVal = Math.max(...activeCats.map(cat=>Math.max(reals[cat]||0,(budCats[cat]||0)*factor)), 1);
+      return '<div class="section-wrap" style="margin-bottom:14px">'
+        + '<div class="section-header">'
+          + '<span class="section-title" style="display:flex;align-items:center;gap:8px">'
+            + '<span style="width:10px;height:10px;border-radius:3px;background:'+color+';display:inline-block"></span>'
+            + title
+          + '</span>'
+          + '<span style="font-size:12px;color:#999">'
+            + 'Réel : <strong style="color:'+color+'">'+fmt(tReal)+'</strong>'
+            + (tBud>0 ? ' &nbsp;·&nbsp; Budget : <strong>'+fmt(tBud)+'</strong>' : '')
+          + '</span>'
+        + '</div>'
+        + '<div style="padding:14px 16px">'
+          + activeCats.map(cat=>{
+              const r=reals[cat]||0, b=(budCats[cat]||0)*factor, over=r>b&&b>0;
+              const pctR=maxVal>0?Math.min(100,Math.round(r/maxVal*100)):0;
+              const pctB=maxVal>0?Math.min(100,Math.round(b/maxVal*100)):0;
+              return '<div class="bar-row">'
+                + '<div class="bar-row-label" title="'+cat+'" style="color:'+(over?'#D85A30':'inherit')+'">'+cat+(over?' ▲':'')+'</div>'
+                + '<div class="bar-track">'
+                  + '<div class="bar-bg"></div>'
+                  + '<div class="bar-fill" style="width:'+pctR+'%;background:'+(over?'#D85A30':color)+'"></div>'
+                  + (b>0 ? '<div class="bar-mark" style="left:'+pctB+'%"></div>' : '')
+                + '</div>'
+                + '<div class="bar-val '+(over?'amount-neg':'')+'">'+(r>0?fmt(r):'—')+(b>0?' / '+fmt(b):'')+'</div>'
+              + '</div>';
+            }).join('')
+        + '</div>'
+      + '</div>';
+    }).filter(Boolean).join('');
+  })()}
   </div>`;
 }
 
 function renderMiniTable(title, cls, budgets, reals, factor=1) {
-  const cats = Object.keys(budgets);
-  const tR   = cats.reduce((s,c)=>s+(reals[c]||0),0);
-  const tB   = cats.reduce((s,c)=>s+budgets[c],0)*factor;
-  /* Filtrer les lignes entièrement vides (budget=0 ET réel=0) */
-  const activeCats = cats.filter(cat => (reals[cat]||0)>0 || (budgets[cat]||0)>0);
+  /* Fusionner les catégories budget + celles avec réels seulement */
+  const allCats    = [...new Set([...Object.keys(budgets), ...Object.keys(reals)])];
+  const activeCats = allCats.filter(cat => (reals[cat]||0)>0 || (budgets[cat]||0)>0);
   if (!activeCats.length) return '';
+  const tR = activeCats.reduce((s,c)=>s+(reals[c]||0), 0);
+  const tB = activeCats.reduce((s,c)=>s+(budgets[c]||0), 0)*factor;
   return `<div class="table-card">
     <div class="table-header ${cls}">${title}</div>
     <table class="data-table">

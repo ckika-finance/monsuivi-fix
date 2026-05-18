@@ -217,7 +217,7 @@ function _renderObRevs() {
   for (let i = 1; i <= _obCount; i++) {
     const name = document.getElementById('ob-name-' + i)?.value.trim() || 'Personne ' + i;
     wrap.insertAdjacentHTML('beforeend',
-      obBudRow('Salaire net ' + name, 'ob-sal-' + i, 2000) +
+      obBudRow('Salaire ' + name, 'ob-sal-' + i, 2000) +
       obBudRow('Primes / Extras ' + name, 'ob-ext-' + i, 0)
     );
   }
@@ -249,7 +249,7 @@ async function obFinish() {
       const n = names[i-1];
       const sal = obV('ob-sal-' + i);
       const ext = obV('ob-ext-' + i);
-      revenus['Salaire Net ' + n] = sal;
+      revenus['Salaire ' + n] = sal;
       if (ext > 0) revenus['Extras ' + n] = ext;
     }
 
